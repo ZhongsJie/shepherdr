@@ -27,6 +27,7 @@ import {
   openSplit,
   panesHere,
   splitClick,
+  deleteTask,
   pinTask,
   placeOf,
   scheduleTask,
@@ -52,6 +53,7 @@ import {
   CheckIcon,
   ClockIcon,
   DownIcon,
+  DeleteIcon,
   Empty,
   FilterBox,
   HashIcon,
@@ -222,20 +224,34 @@ const OTHER = MN.SCHEDULE_OTHER as { placeholder: string; label: string; button:
 
 /** A task's one menu, in its row's ⋯ and its chat's, as 3.0's (core/menus.js taskMenu): Pin or Unpin; a task not started
  *  yet also Start later (SHEP-38): a few times, or one typed in herdr-task's words (Other time…), and a scheduled one
- *  Start now and Unschedule. What herdr-task refuses (a time it doesn't know) shows under it, the menu kept open. */
+ *  Start now and Cancel start (also for queued tasks). What herdr-task refuses (a time it doesn't know) shows under it, the menu kept open. */
 function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
   const [typing, setTyping] = useState(false)
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const go = async (when: Parameters<typeof scheduleTask>[1]) => {
+  const [deleting, setDeleting] = useState(false)
+  const pending = useRef(false)
+  const perform = async (action: () => Promise<{ ok?: boolean; error?: string }>) => {
+    if (pending.current) return
+    pending.current = true
     setBusy(true)
     setError(null)
-    const r = await scheduleTask(t, when).catch((e: Error) => ({ ok: false, error: e.message }))
-    setBusy(false)
-    if (r?.ok === false) setError(r.error ?? "Couldn't schedule it.")
-    else close()
+    try {
+      const r = await action()
+      if (r?.ok === false) setError(r.error ?? "Couldn't update this task.")
+      else close()
+    } catch (e) { setError(String((e as Error).message ?? e)) }
+    finally { pending.current = false; setBusy(false) }
   }
+  const go = (when: Parameters<typeof scheduleTask>[1]) => perform(() => scheduleTask(t, when))
+  if (deleting) return <>
+    <MenuLabel>Delete {refOf(t.id)}?</MenuLabel>
+    <p className="max-w-64 px-2 py-2 text-[0.8125rem] text-fg3">Permanently remove this task record? This cannot be undone. Files and worktrees stay. Running agents must be stopped first.</p>
+    <MenuItem disabled={busy} onClick={() => { setDeleting(false); setError(null) }}>Cancel</MenuItem>
+    <MenuItem disabled={busy} className="text-need-fg" icon={<DeleteIcon className={ic} />} onClick={() => void perform(() => deleteTask(t))}>{busy ? 'Deleting…' : 'Delete task'}</MenuItem>
+    {error ? <p role="alert" className="max-w-64 px-2 py-1 text-[0.75rem] text-need-fg">{error}</p> : null}
+  </>
   const items = (MN.taskMenu as (o: object) => MenuEntry[])({ pinned: !!t.pinned, status: t.archived ? null : t.status })
   return (
     <>
@@ -260,9 +276,10 @@ function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
             <MenuItem key="other" disabled={busy} icon={<ClockIcon className={ic} />} onClick={() => setTyping(true)}>{it.label}</MenuItem>
           )
         if (it.id === 'start-now') return <MenuItem key="now" disabled={busy} icon={<PlayIcon className={ic} />} onClick={() => void go({ now: true })}>{it.label}</MenuItem>
-        if (it.id === 'unschedule') return <MenuItem key="off" disabled={busy} icon={<XIcon className={ic} />} onClick={() => void go({ off: true })}>{it.label}</MenuItem>
+        if (it.id === 'cancel-start') return <MenuItem key="cancel" disabled={busy} icon={<XIcon className={ic} />} onClick={() => void go({ cancel: true })}>{it.label}</MenuItem>
+        if (it.id === 'delete') return <MenuItem key="delete" disabled={busy} className="text-need-fg" icon={<DeleteIcon className={ic} />} onClick={() => { setDeleting(true); setError(null) }}>{it.label}</MenuItem>
         return (
-          <MenuItem key={it.label} icon={t.pinned ? <UnpinIcon className={ic} /> : <PinTaskIcon className={ic} />} onClick={() => { close(); void pinTask(t, !t.pinned).catch(() => undefined) }}>
+          <MenuItem key={it.label} disabled={busy} icon={t.pinned ? <UnpinIcon className={ic} /> : <PinTaskIcon className={ic} />} onClick={() => { close(); void pinTask(t, !t.pinned).catch(() => undefined) }}>
             {it.label}
           </MenuItem>
         )

@@ -46,7 +46,8 @@ export const sectionMenu = () => [
 
 // A task row's menu (the Tasks panel): its pin; a task not started yet (status: todo, queued or scheduled, SHEP-38) also
 // starts by itself later: a few times to pick (herdr-task edit's --in or --at words), Other time… (typed: the web's), and
-// a scheduled one Start now and Unschedule. A heading item has no id.
+// Start now bypasses the queue; Cancel start returns a queued/scheduled task to To do, never deletes it.
+// A heading item has no id.
 export const SCHEDULE_PICKS = [
   { label: "In 1 hour", in: "1h" }, { label: "In 3 hours", in: "3h" },
   { label: "Tomorrow 9:00", at: "tomorrow 9:00" }, { label: "Monday 9:00", at: "mon 9:00" },
@@ -54,12 +55,13 @@ export const SCHEDULE_PICKS = [
 export const taskMenu = ({ pinned = false, status = null } = {}) => {
   const later = ["todo", "queued", "scheduled"].includes(status);
   return [
-    ...(later ? [{ heading: status === "scheduled" ? "Reschedule" : "Start later" },
+    ...(later ? [{ id: "start-now", label: "Start now", icon: "play" }] : []),
+    ...(["queued", "scheduled"].includes(status) ? [{ id: "cancel-start", label: "Cancel start", icon: "x" }] : []),
+    ...(later ? [sep, { heading: status === "scheduled" ? "Reschedule" : "Start later" },
       ...SCHEDULE_PICKS.map((p) => ({ id: "schedule", icon: "clock", ...p })),
-      { id: "schedule-other", label: "Other time…", icon: "clock", typed: true }] : []),
-    ...(status === "scheduled" ? [sep, { id: "start-now", label: "Start now", icon: "play" }, { id: "unschedule", label: "Unschedule", icon: "x" }] : []),
-    ...(later ? [sep] : []),
+      { id: "schedule-other", label: "Other time…", icon: "clock", typed: true }, sep] : []),
     pinned ? { id: "unpin", label: "Unpin", icon: "pin-off" } : { id: "pin", label: "Pin", icon: "pin" },
+    ...(status ? [sep, { id: "delete", label: "Delete…", icon: "trash-2", danger: true }] : []),
   ];
 };
 // What Other time… asks (the web's field under the picks): its words, an example, the button's.

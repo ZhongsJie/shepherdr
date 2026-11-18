@@ -3529,6 +3529,102 @@ class Scheduled(unittest.TestCase):
             self.add("Typo", at="fry 9:00")
 
 
+class PendingTaskActions(unittest.TestCase):
+    setUp = Scheduled.setUp
+    run_cmd = Scheduled.run_cmd
+    add = Scheduled.add
+    task = Scheduled.task
+    tick_at = Scheduled.tick_at
+
+    def test_cancel_scheduled_keeps_task_and_never_starts_later(self):
+        v = self.add("Keep this brief", prompt="Do not delete me", in_="1h")
+        due = v["scheduled_for"]
+        self.run_cmd(self.commands.cmd_cancel, id="1")
+        t = self.task(1)
+        self.assertEqual((t["state"], t["title"], t["prompt"]), ("todo", "Keep this brief", "Do not delete me"))
+        for k in ("queue", "queued_at", "scheduled_for", "held", "retry"):
+            self.assertNotIn(k, t)
+        self.assertEqual(self.tick_at(due + 1000), [])
+        self.run_cmd(self.commands.cmd_start, id="1", now=True)
+        self.assertEqual(len(self.started), 1)
+
+    def test_cancel_queued_clears_its_plan_without_removing_dependencies(self):
+        self.add("First")
+        self.add("Second", after="1")
+        self.run_cmd(self.commands.cmd_start, id="2")
+        self.assertEqual(self.task(2)["state"], "queued")
+        self.run_cmd(self.commands.cmd_cancel, id="2")
+        t = self.task(2)
+        self.assertEqual(t["state"], "todo")
+        self.assertEqual(t["after"], [1])
+        self.assertNotIn("queue", t)
+        self.assertNotIn("queued_at", t)
+
+    def test_cancel_refuses_a_stale_row_after_scheduler_started(self):
+        self.add("Running")
+        self.run_cmd(self.commands.cmd_start, id="1", now=True)
+        with self.assertRaises(self.Fail):
+            self.run_cmd(self.commands.cmd_cancel, id="1")
+        self.assertEqual(self.task(1)["state"], "running")
+        self.assertEqual(len(self.started), 1)
+
+    def test_cancel_refuses_a_live_worker_even_with_a_pending_record(self):
+        from unittest import mock
+        self.add("Later", in_="1h")
+        with mock.patch.object(self.commands, "just_started", lambda t: {"address": "t-live"}):
+            with self.assertRaises(self.Fail):
+                self.run_cmd(self.commands.cmd_cancel, id="1")
+        self.assertEqual(self.task(1)["state"], "scheduled")
+
+    def test_start_now_bypasses_queue_reason(self):
+        from unittest import mock
+        self.add("Start me")
+        with mock.patch.object(self.commands, "queue_reason", lambda s, t: "machine busy"):
+            self.run_cmd(self.commands.cmd_start, id="1", now=True)
+        self.assertEqual(self.task(1)["state"], "running")
+        self.assertEqual(len(self.started), 1)
+
+
+class DeleteIsGuarded(unittest.TestCase):
+    setUp = Scheduled.setUp
+    run_cmd = Scheduled.run_cmd
+    add = Scheduled.add
+    task = Scheduled.task
+
+    def test_a_ui_delete_refuses_work_that_may_still_run(self):
+        from unittest import mock
+        self.add("Running")
+        with mock.patch.object(self.commands, "live_agents", lambda key: [{"address": "t9", "foreground": {"name": "claude"}}]):
+            with self.assertRaises(self.Fail):
+                self.run_cmd(self.commands.cmd_rm, id="1", if_stopped=True)
+        self.add("Waiting", in_="1h")
+        with mock.patch.object(self.commands, "just_started", lambda t: {"address": "t-live"}):
+            with self.assertRaises(self.Fail):
+                self.run_cmd(self.commands.cmd_rm, id="2", if_stopped=True)
+        self.assertEqual(self.task(1)["state"], "todo")
+        self.assertEqual(self.task(2)["state"], "scheduled")
+
+    def test_a_ui_delete_refuses_a_task_whose_merge_may_be_running(self):
+        self.add("Merging")
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            s.find(1)["merge_queued"] = True
+            s.dirty = True
+        with self.assertRaises(self.Fail):
+            self.run_cmd(self.commands.cmd_rm, id="1", if_stopped=True)
+
+    def test_a_ui_delete_removes_an_idle_task_and_the_plain_rm_is_unchanged(self):
+        self.add("Stale")
+        self.run_cmd(self.commands.cmd_rm, id="1", if_stopped=True)
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
+            with self.assertRaises(self.Fail):
+                s.find(1)
+        self.add("Whatever")
+        self.run_cmd(self.commands.cmd_rm, id="2")  # no --if-stopped: the person's terminal still may
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
+            with self.assertRaises(self.Fail):
+                s.find(2)
+
+
 class FastOffIsSaid(unittest.TestCase):
     """SHEP-41: a worker with Fast off runs standard even when config.toml sets service_tier."""
 

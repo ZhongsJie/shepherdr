@@ -692,7 +692,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     // a task's Start later (SHEP-38): herdr-task schedules it, takes that back, or starts it now; its words refused come back
     case "schedule": {
       const { ref, folder, machine } = taskOf(b);
-      const args = b.now ? ["start", ref, "--now"] : b.off ? ["edit", ref, "--at", ""]
+      const args = b.now ? ["start", ref, "--now"] : b.cancel ? ["cancel", ref] : b.off ? ["edit", ref, "--at", ""]
         : typeof b.in === "string" ? ["edit", ref, "--in", str(b.in, 80)] : ["edit", ref, "--at", str(b.at, 80)];
       const r = await task(args, folder, machine);
       let out: any = null;
@@ -704,7 +704,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     case "close": case "delete": case "archive": case "reopen": {
       if (b.type === "archive" && b.on !== false) throw new Error("Done tasks archive themselves: Settings › Tasks › Archive Done after.");
       const { ref, folder, machine } = taskOf(b);
-      const r = await task([b.type === "close" ? "done" : b.type === "delete" ? "rm" : b.type === "reopen" ? "reopen" : "unarchive", ref], folder, machine);
+      const r = await task([b.type === "close" ? "done" : b.type === "delete" ? "rm" : b.type === "reopen" ? "reopen" : "unarchive", ref, ...(b.type === "delete" ? ["--if-stopped"] : [])], folder, machine);
       let out: any = null;
       try { out = JSON.parse(r.stdout); } catch {}
       if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "herdr-task refused it." };

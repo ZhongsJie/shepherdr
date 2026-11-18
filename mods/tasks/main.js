@@ -883,7 +883,9 @@ export default class Tasks extends View {
     return this.line(`task-${key}`, {
       go: this.target(p), glyph: this.glyph(p, w), ref: refOf(list, task), title: task.title, sub, left, leftColor: section === "scheduled" ? t.dim : null,
       dim: section === "done", selected: focused, where: bare ? null : this.whereOf(list.machine, placeName(list)),
-      action: section === "ready" ? this.acceptButton(p, t) : null,
+      action: this.shelved(p) ? null : h_flex().gap(4).flex_none().items_center()
+        .when(section === "ready", el => el.child(this.acceptButton(p, t)))
+        .child(this.actionMenu(p, t)),
       pin: this.shelved(p) ? null : { key, on: this.pins().has(key), status: section, machine: list.machine ?? null, folder: list.folder,
         ref: refOf(list, task), sub: section === "scheduled" ? sub : null },
     }, t);
@@ -910,7 +912,7 @@ export default class Tasks extends View {
   // their own: a pinned task sits in the Pinned group.
   // A task not started yet also starts later (SHEP-38): a few times, and a scheduled one Start now and Unschedule
   // (core/menus.js taskMenu; the web's Other time… types any time, here the Assistant does).
-  rowMenu(pin) {
+  rowMenu(pin, at = "pointer") {
     const items = taskMenu({ pinned: pin.on, status: pin.status }).filter((x) => !x.typed);
     // As tasks-menu draws it: a section per line or heading, 4 apart; a heading 28, a row 32.
     let height = 8, first = true;
@@ -919,8 +921,25 @@ export default class Tasks extends View {
       height += x.sep ? 0 : x.heading ? 28 : 32;
       first = false;
     }
-    openOverlay({ mod: "tasks-menu", kind: "popup", at: "pointer", width: 220, height, props: { menu: "row", key: pin.key, on: pin.on,
+    openOverlay({ mod: "tasks-menu", kind: "popup", at, width: 220, height, props: { menu: "row", key: pin.key, on: pin.on,
       status: pin.status, machine: pin.machine, folder: pin.folder, ref: pin.ref, sub: pin.sub } });
+  }
+
+  // One dropdown replaces the separate Start/Cancel controls; right-click opens the same menu.
+  actionMenu(p, t) {
+    const key = taskKey(p.list, p.task);
+    const pin = { key, on: this.pins().has(key), status: p.section, machine: p.list.machine ?? null,
+      folder: p.list.folder, ref: refOf(p.list, p.task), sub: p.section === "scheduled" ? this.statusLine(p) : null };
+    let bounds = null;
+    return h_flex().id(`task-menu-${key}`).h(24).w(24).flex_none().items_center().justify_center()
+      .rounded(RADIUS.control).text_color(t.muted).tooltip("Task actions").cursor_pointer()
+      .hover(s => s.bg(t.hover).text_color(t.foreground))
+      .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); bounds = e.bounds; })
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        this.rowMenu(pin, bounds ? { x: bounds.x, y: bounds.y + bounds.height + 4 } : "pointer");
+      })
+      .child(svg("mods/tasks/more.svg").size(16));
   }
 
   // Ready = "looks done, your call": Review (opens the Accept card) is the person's one action here, at the row's end. It merges first when there is something to merge (herdr-task accept follows the merge

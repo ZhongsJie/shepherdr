@@ -8,13 +8,13 @@
 //   "row"     a task row's right-click: Pin or Unpin (props().on) the task props().key, in shared
 //             "tasks.pinned" (mods/tasks keeps the same list). A task not started yet (props().status
 //             todo, queued or scheduled) also starts later (SHEP-38): herdr-task edit --in / --at on
-//             props().machine, folder and ref; a scheduled one Start now and Unschedule. What herdr-task
+//             props().machine, folder and ref; pending tasks offer Start now and Cancel start. What herdr-task
 //             refuses shows as a toast.
 // ↑/↓ move, Enter picks, Esc closes.
 
 import { View, div } from "gpui-kit";
 import { v_flex } from "gpui-base";
-import { props, closeOverlay, theme, shared, setShared, exec, appHome } from "herdr";
+import { props, closeOverlay, openOverlay, theme, shared, setShared, exec, appHome } from "herdr";
 import { menuRow, heading, toast, TEXT } from "./ui.js";
 import { taskMenu } from "./core/menus.js";
 import { settle } from "./core/pending.js";
@@ -25,6 +25,10 @@ const GROUPS = [{ key: "you", label: "For you" }, { key: "space", label: "Space"
 // The menu's sections, each a title (or none), its items, which is checked and what a pick does.
 function sections() {
   const p = props() ?? {};
+  if (p.menu === "delete-confirm") return [{ title: `Delete ${p.ref}?`, checks: false, current: "cancel", items: [
+    { key: "cancel", label: "Cancel", icon: "mods/workspace-chrome/x.svg" },
+    { key: "delete-confirm", label: "Delete task", danger: true, icon: "mods/tasks-menu/trash-2.svg" },
+  ], pick: key => { if (key === "delete-confirm") runTaskAction(p, { id: "delete" }); } }];
   if (p.menu === "row") return rowSections(p);
   if (p.menu === "filter") return [{ title: null, items: p.items ?? [], current: p.current,
     pick: (key) => setShared("tasks.filterreq", { key, at: Date.now() }) }];
@@ -42,8 +46,8 @@ function rowSections(p) {
     if (it.sep || it.heading || !cur) out.push(cur = { title: it.heading ? (p.status === "scheduled" && p.sub ? `${it.heading} · ${p.sub}` : it.heading) : null,
       checks: false, current: null, items: [], pick: (key) => rowPick(p, key) });
     if (it.sep || it.heading) continue;
-    cur.items.push({ key: `${it.id}:${cur.items.length}`, label: it.label, at: it.at, in: it.in, id: it.id,
-      icon: it.icon === "play" ? "mods/tasks/play.svg" : `mods/workspace-chrome/${it.icon}.svg` });
+    cur.items.push({ key: `${it.id}:${cur.items.length}`, label: it.label, at: it.at, in: it.in, id: it.id, danger: it.danger,
+      icon: it.id === "delete" ? "mods/tasks-menu/trash-2.svg" : it.icon === "play" ? "mods/tasks/play.svg" : `mods/workspace-chrome/${it.icon}.svg` });
   }
   return out.filter((s) => s.items.length);
 }
@@ -57,18 +61,30 @@ function rowPick(p, key) {
     setShared("tasks.pinned", p.on ? rest : [...rest, p.key]);
     return;
   }
-  const args = it.id === "start-now" ? ["start", p.ref, "--now"] : it.id === "unschedule" ? ["edit", p.ref, "--at", ""]
+  if (it.id === "delete") {
+    // A second menu at the pointer: the row's dropdown cannot turn into a question in place.
+    openOverlay({ mod: "tasks-menu", kind: "popup", at: "pointer", width: 300, height: 130,
+      props: { ...p, menu: "delete-confirm" } });
+    return;
+  }
+  runTaskAction(p, it);
+}
+
+export function runTaskAction(p, it) {
+  const verb = it.id === "delete" ? "delete" : it.id === "cancel-start" ? "cancel the start of" : it.id === "start-now" ? "start" : "schedule";
+  const args = it.id === "delete" ? ["rm", p.ref, "--if-stopped"]
+    : it.id === "start-now" ? ["start", p.ref, "--now"] : it.id === "cancel-start" ? ["cancel", p.ref]
     : ["edit", p.ref, ...(it.in ? ["--in", it.in] : ["--at", it.at])];
   // herdr-task, here or (--on) on the folder's machine; the list shows the change on its next read.
   const cli = (a) => exec(`${appHome()}/mods/tasks/bin/herdr-task`, a);
-  cli([...(p.machine ? ["--on", p.machine] : []), ...args, "--json", "--folder", p.folder])
+  return cli([...(p.machine ? ["--on", p.machine] : []), ...args, "--json", "--folder", p.folder])
     .then((r) => settle(cli, r))
     .then((r) => {
       let out = null;
       try { out = JSON.parse(r.stdout || "null"); } catch {}
-      if (r.code !== 0 || !out || out.error) toast({ level: "error", title: `Couldn't schedule ${p.ref}`, body: out?.error || r.stderr?.trim() || "herdr-task refused it." });
+      if (r.code !== 0 || !out || out.error) toast({ level: "error", title: `Couldn't ${verb} ${p.ref}`, body: out?.error || r.stderr?.trim() || "herdr-task refused it." });
     })
-    .catch((e) => toast({ level: "error", title: `Couldn't schedule ${p.ref}`, body: String(e?.message ?? e) }));
+    .catch((e) => toast({ level: "error", title: `Couldn't ${verb} ${p.ref}`, body: String(e?.message ?? e) }));
 }
 
 // Every item in order, with its section: ↑/↓ run through all of them.
@@ -109,6 +125,8 @@ export default class TasksMenu extends View {
         this.keyed = true;
         cx.notify();
       })
+      .when(props()?.menu === "delete-confirm", el => el.child(div().px(8).pb(6).text_size(TEXT.label).text_color(t.dim)
+        .child("This cannot be undone. Files and worktrees stay.")))
       .children(sections().map((s, si) => v_flex().flex_none().when(si > 0, (el) => el.mt(4))
         .when(Boolean(s.title), (el) => el.child(div().px(8).child(heading(s.title))))
         .children(s.items.map((x) => this.item(x, s, i++, t)))));
@@ -118,7 +136,7 @@ export default class TasksMenu extends View {
   // pick (none in an action menu: checks false).
   item(x, s, i, t) {
     return menuRow(`tm-${x.key}`, x.label, { icon: x.icon ?? null, hint: x.count > 0 ? String(x.count) : null,
-      check: s.checks === false ? null : x.key === s.current,
+      check: s.checks === false ? null : x.key === s.current, danger: x.danger,
       onClick: () => this.choose(i) })
       .when(this.keyed && i === this.at, (el) => el.bg(t.hover));
   }

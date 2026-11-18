@@ -140,6 +140,29 @@ install 一次，改动文件才会进运行时。
 | 红绿灯和工具栏不对齐 | `traffic_lights` y 16→15 |
 | 键位被覆盖 | 写成一行 + `--keys keep`，从备份恢复 |
 
+## Task 列表：立即启动与取消启动
+
+- 窗口 `mods/tasks/main.js` 的 `startButtons()` 与网页 `web/plugins/tasks/client.tsx` 的 `StartActions` 提供行尾操作；右键菜单由 `core/menus.js` 的 `taskMenu()` 统一提供。
+- To do 可 `Start now`；Queued/Scheduled 可 `Start now` 或 `Cancel`（菜单名 `Cancel start`）。取消只退回 To do，保留任务、brief、已有工作和依赖，不等于 `rm`，不用于终止运行中的 worker。
+- 立即启动沿用 `herdr-task start <ref> --now`，会绕过队列/资源限制；磁盘紧张等情况下需由人决定是否强制开始。
+- 新增 CLI `herdr-task cancel <ref>`：在 Store 锁内重新验证 pending 状态和 live/just-started agent，清理 queue、queued_at、scheduled_for、held、retry，防止列表已过时或调度器抢先启动造成孤儿进程。
+- Web 通过 `scheduleTask(t, { cancel: true })` → service `schedule` action → CLI；本地和远程机器均沿用原有路由，不直接写任务 JSON。
+- 窗口按钮阻止事件冒泡，避免同时打开任务；进行中的操作禁用并去重，失败 toast。Web 使用 busy/ref 去重并显示行内错误。
+- 测试：`cd test && python3 -m unittest test_herdr_task.PendingTaskActions test_herdr_task.Scheduled`；`bun test core/menus.test.js service/tasks-start-actions.test.ts service/tasks-open-chat.test.ts`。
+- 本机 Python herdr-task 全套测试有 6 fail / 1 error（进程表、跨机器自动化、macOS `/var` 路径）；用 `git archive HEAD` 到临时目录运行基线，结果相同。新增 5 个测试全部通过，不能把环境失败说成新功能回归，也不能宣称全套通过。
+
+## Task 列表：下拉操作（Start now / Cancel start / Delete）
+
+- 行尾只有 **一个 ⋯ 按钮**（`mods/tasks/main.js` 的 `actionMenu()`），点开与右键同一个菜单；菜单内容由 `core/menus.js` 的 `taskMenu()` 统一提供（窗口、网页共用）。
+- To do / Queued / Scheduled 顶部是 `Start now`；Queued/Scheduled 还有 `Cancel start`；底下是 Start later 的定时选项；最后是 Pin 与 `Delete…`。
+- 取消 = `herdr-task cancel <ref>`：锁内校验 pending 状态与 live / just-started agent，清 queue / queued_at / scheduled_for / held / retry，退回 To do，**不删任务**。
+- 立即启动 = `herdr-task start <ref> --now`，绕过队列限制。
+- 删除 = 先弹第二个菜单二次确认（`props().menu === "delete-confirm"`），确认后 `herdr-task rm <ref> --if-stopped`；`--if-stopped` 在有 live agent / just-started / merge_requested / merge_queued 时拒绝，避免 UI 行过期后删掉仍在跑的 worker。人在终端里手敲 `herdr-task rm`（不带 --if-stopped）保持原行为。
+- 网页端不加额外按钮：走原有的右键/长按行菜单（`RowMenu` + `TaskMenu`），删除确认在菜单内就地切换（`deleting` state）。
+- 图标路径：`tasks-menu` 不能引用别的 mod 的资源除非存在，删除图标复制为 `mods/tasks-menu/trash-2.svg`（Herdr 自带 `mods/workspace-chrome` 里没有 trash）。
+- 测试：`bun test core/menus.test.js service/tasks-start-actions.test.ts`（后者从 main.js 抽出 `actionMenu` 源码跑，防止改回独立按钮）；`cd test && python3 -m unittest test_herdr_task.DeleteIsGuarded test_herdr_task.PendingTaskActions`。
+- 已确认的坑：macOS 上 `/var` 与 `/private/var` 会让若干 herdr-task 测试失败，`git archive HEAD` 的基线同样失败，与本改动无关。
+
 ## 配额 / 模型
 
 - `cc-switch-agentplan/deepseek-v4-pro` 曾 429 AccountQuotaExceeded（周期额度用尽，次日重置）。

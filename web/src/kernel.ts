@@ -1108,8 +1108,8 @@ export function pinTask(t: Task, on: boolean) {
 }
 
 /** SHEP-38: start a task by itself later ({ at: "fri 8:15" } or { in: "6h" }), take that back ({ off: true }) or start a
- *  scheduled one now ({ now: true }); error: herdr-task's words for a time it doesn't know */
-export function scheduleTask(t: Task, when: { at?: string; in?: string; off?: boolean; now?: boolean }): Promise<{ ok?: boolean; error?: string; why?: string }> {
+ *  pending one now ({ now: true }), or cancel its start without deleting it ({ cancel: true }). */
+export function scheduleTask(t: Task, when: { at?: string; in?: string; off?: boolean; now?: boolean; cancel?: boolean }): Promise<{ ok?: boolean; error?: string; why?: string }> {
   return act({ type: 'schedule', chat: t.agent?.chat ?? `${t.id}/Agent`, ...when })
 }
 

@@ -14,7 +14,7 @@ from .base import bundle, Fail, guard, run, STORE, sync_held, VERSION
 from .agents import LINE_MAX, SUMMARY_MAX
 from .launch import cmd_allow, name_tabs
 from .commands import (
-    cmd_accept, cmd_add, cmd_alert, cmd_config, cmd_edit, cmd_fix, cmd_list, cmd_merge, cmd_ready,
+    cmd_accept, cmd_add, cmd_alert, cmd_cancel, cmd_config, cmd_edit, cmd_fix, cmd_list, cmd_merge, cmd_ready,
     cmd_resume, cmd_review, cmd_review_more, cmd_reviewed, cmd_rm, cmd_show, cmd_start, cmd_state, cmd_status,
     cmd_switch, cmd_unarchive, cmd_where,
 )
@@ -281,6 +281,7 @@ def main():
     c = cmd("accept", cmd_accept, "the person's Accept on a Ready task: merges first when there is something to merge, then done")
     agent_opts(c)
     c.add_argument("--space")
+    cmd("cancel", cmd_cancel, "cancel a queued or scheduled start: back to To do, keeping the task and its work")
     cmd("reopen", lambda a: cmd_state(a, "reopen"), "undo done or ready; a queued or scheduled task goes back to to do")
     cmd("unarchive", cmd_unarchive, "bring an archived task back into its list (only when the person asks; writing to it does too)")
     c = cmd("edit", cmd_edit, "change a task")
@@ -294,7 +295,8 @@ def main():
     g.add_argument("--here", action="store_true")
     g.add_argument("--worktree", action="store_true")
     when_opts(c, edit=True)
-    cmd("rm", cmd_rm, "remove a task")
+    c = cmd("rm", cmd_rm, "remove a task")
+    c.add_argument("--if-stopped", action="store_true", help="refuse deletion while its worker or merge may still be running (UI safety)")
     c = cmd("config", cmd_config, "this folder's settings", id=False)
     c.add_argument("--prefix", help="task ids' prefix, 2 to 5 letters (HAT -> HAT-4); unique on this machine")
     c = cmd("tick", cmd_tick, "start queued tasks that can go; mark merged ones done (Herdr runs this)", id=False)

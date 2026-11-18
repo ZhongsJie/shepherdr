@@ -21,9 +21,17 @@ test("the sidebar's other menus and a task row's", () => {
   expect(words(taskMenu({ pinned: true }))).toEqual(["Unpin"]);
   // SHEP-38: a task not started yet starts later; a scheduled one is rescheduled, started now or unscheduled
   const later = (m) => m.map((x) => x.sep ? "—" : x.heading ? `# ${x.heading}` : x.label);
-  expect(later(taskMenu({ status: "todo" }))).toEqual(["# Start later", "In 1 hour", "In 3 hours", "Tomorrow 9:00", "Monday 9:00", "Other time…", "—", "Pin"]);
-  expect(later(taskMenu({ status: "scheduled", pinned: true }))).toEqual(["# Reschedule", "In 1 hour", "In 3 hours", "Tomorrow 9:00", "Monday 9:00", "Other time…", "—", "Start now", "Unschedule", "—", "Unpin"]);
-  expect(later(taskMenu({ status: "working" }))).toEqual(["Pin"]);
+  expect(later(taskMenu({ status: "todo" }))).toEqual(["Start now", "—", "# Start later", "In 1 hour", "In 3 hours", "Tomorrow 9:00", "Monday 9:00", "Other time…", "—", "Pin", "—", "Delete…"]);
+  expect(later(taskMenu({ status: "scheduled", pinned: true }))).toEqual(["Start now", "Cancel start", "—", "# Reschedule", "In 1 hour", "In 3 hours", "Tomorrow 9:00", "Monday 9:00", "Other time…", "—", "Unpin", "—", "Delete…"]);
+  expect(later(taskMenu({ status: "working" }))).toEqual(["Pin", "—", "Delete…"]);
+  const ids = (m) => m.filter((x) => x.id).map((x) => x.id);
+  expect(ids(taskMenu({ status: "queued" }))).toEqual(["start-now", "cancel-start", "schedule", "schedule", "schedule", "schedule", "schedule-other", "pin", "delete"]);
+  expect(ids(taskMenu({ status: "todo" }))).not.toContain("cancel-start");
+  for (const status of ["working", "needs", "ready", "merging", "done"]) {
+    expect(ids(taskMenu({ status }))).toEqual(["pin", "delete"]);
+  }
+  // an archived row (no status) offers neither: it is already out of the list
+  expect(ids(taskMenu({ status: null }))).toEqual(["pin"]);
   expect(machineLabel(null)).toBe("This computer");
   expect(machineLabel("vm", "Build box")).toBe("Build box");
 });

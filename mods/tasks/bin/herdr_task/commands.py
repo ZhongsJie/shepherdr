@@ -802,6 +802,23 @@ def cmd_review(args):
     say(args, v, msg)
 
 
+def cmd_cancel(args):
+    """Cancel a pending start under the store lock; never delete work or orphan a live worker."""
+    with open_store(args) as s:
+        t = s.find(args.id)
+        if t["state"] not in ("queued", "scheduled"):
+            raise Fail(f"{s.ref(t)} is no longer queued or scheduled. Refresh the list before acting again.")
+        live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)] or [a for a in [just_started(t)] if a]
+        if live:
+            raise Fail(f"{s.ref(t)} is already running ({live[0]['address']}). Its start wasn't cancelled.")
+        t["state"], t["reopened_at"] = "todo", now()
+        for k in ("queue", "queued_at", "scheduled_for", "held", "retry"):
+            t.pop(k, None)
+        s.dirty = True
+        v = view(s, t)
+    say(args, v, f"{s.ref(t)} start cancelled; back to To do. Its work is kept.")
+
+
 def cmd_state(args, state):
     with open_store(args) as s:
         t = s.find(args.id)
@@ -906,6 +923,11 @@ def cmd_config(args):
 def cmd_rm(args):
     with open_store(args) as s:
         t = s.find(args.id)
+        # UI deletion must not orphan a worker if the row went stale after a scheduler tick.
+        if getattr(args, "if_stopped", False):
+            live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)] or [a for a in [just_started(t)] if a]
+            if live or t.get("merge_requested") or t.get("merge_queued"):
+                raise Fail(f"{s.ref(t)} may still have a running agent or merge. Stop it before deleting the task.")
         s.data["tasks"].remove(t)
         for o in s.data["tasks"]:
             if t["id"] in (o.get("after") or []):
