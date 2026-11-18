@@ -6,3 +6,6 @@ jsconfig.json
 node_modules/
 web/dist/
 web/generated/
+# agent tooling some of us run in the checkout, never part of the layout
+.agents/
+.claude/
