@@ -224,7 +224,7 @@ export function sentTo(x, sender = (f) => f) {
 export function selfName({ assistant = false, task = null, kind = null } = {}) {
   if (assistant) return "Assistant";
   if (task) return task;
-  return { claude: "Claude", codex: "Codex" }[kind] ?? "Agent";
+  return { claude: "Claude", codex: "Codex", pi: "Pi" }[kind] ?? "Agent";
 }
 
 // A name's initial for its avatar: a task ref's letters ("SHEP-4" → "S"), else its first letter.

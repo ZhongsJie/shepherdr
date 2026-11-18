@@ -76,7 +76,7 @@ const PAGE = 200;
 const KEEP = 2000;
 // The conversation's width at most, in px: lines stay readable in a wide pane.
 const COLUMN = 760;
-const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex" };
+const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex", pi: "pi", "pi-coding-agent": "pi" };
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 // The role templates' folder on the machine a command runs on (sh -c prefix: $dir).
 const TEMPLATE = 'dir="$HOME/.config/herdr-core/templates"; ';
@@ -1731,7 +1731,7 @@ export default class Chat extends View {
       // session's markers the holder may carry (core/clean-env.js), then execs the agent: hc runs a
       // template's command under sh -c, and where sh is dash (Debian, Ubuntu) the shell would stay
       // the terminal's program, so the chat wouldn't know its CLI.
-      let launch = template, oneOff = null, words = "";
+      let launch = template, oneOff = null, words = "", session = null;
       const st = this.choice?.sel ?? props()?.settings;
       const on = machine ? { on: machine } : {};
       const there = !machine || !st?.agent ? true : (await knownAgents(on).catch(() => []))
@@ -1743,6 +1743,7 @@ export default class Chat extends View {
         const body = head ? src.slice(head[0].length) : src;
         const own = /^command:[ \t]*(.+)$/m.exec(head?.[1] ?? "")?.[1]?.trim();
         const cmd = st?.agent && there ? agent.argvFor(st, { agent: null, argv: [] }).argv.map(q).join(" ") : own;
+        session = st?.agent === "pi" && cmd ? (/--session-id\s+(\S+)/.exec(cmd)?.[1] ?? null) : null;
         if (body.trim() && cmd) {
           words = body.trim();
           oneOff = `herdr-${template}-${Date.now().toString(36)}`;
@@ -1754,6 +1755,7 @@ export default class Chat extends View {
       const args = ["run", "--bg", "--json", "--no-parent", "--keep", ...(machine ? ["--on", machine] : []), ...(folder ? ["--cwd", folder] : []),
         "--label", `herdr.chat=${chatLabel(pane)}`, "--label", `herdr.chat.slot=${this.slot}`, "--label", `herdr.chat.origin=slot:${this.slot}`,
         "--label", `herdr.role=${this.role}`,
+        ...(session ? ["--label", `herdr.session=${session}`] : []),
         ...(space ? ["--label", `herdr.coordinator.space=${String(space.id).split("/").pop()}`] : []),
         ...(rec?.tab ? ["--label", `herdr.coordinator.tab=${String(rec.tab).split("/").pop()}`] : []),
         launch, ...(task ? [task] : [])];
@@ -2747,12 +2749,12 @@ export default class Chat extends View {
       try {
         const stale = !this.pickCache || Date.now() - this.pickCache.at > 60000 || this.pickCache.machine !== this.machine;
         if (stale) {
-          const [claude, codex, known] = await Promise.all([agent.defaults("claude", this.machine), agent.defaults("codex", this.machine),
+          const [claude, codex, pi, known] = await Promise.all([agent.defaults("claude", this.machine), agent.defaults("codex", this.machine), agent.defaults("pi", this.machine),
             knownAgents({ on: this.machine }).catch(() => [])]);
           const prog = (key) => known.find((a) => a.key === key || (a.run ?? [])[0] === key);
-          this.pickCache = { at: Date.now(), machine: this.machine, dflts: { claude, codex },
-            icons: Object.fromEntries(["claude", "codex"].map((k) => [k, { icon: prog(k)?.icon ?? null, tint: Boolean(prog(k)?.tint) }])),
-            installed: Object.fromEntries(["claude", "codex"].map((k) => [k, prog(k) ? prog(k).installed !== false : true])) };
+          this.pickCache = { at: Date.now(), machine: this.machine, dflts: { claude, codex, pi },
+            icons: Object.fromEntries(["claude", "codex", "pi"].map((k) => [k, { icon: prog(k)?.icon ?? null, tint: Boolean(prog(k)?.tint) }])),
+            installed: Object.fromEntries(["claude", "codex", "pi"].map((k) => [k, prog(k) ? prog(k).installed !== false : true])) };
         }
         const { dflts, icons, installed } = this.pickCache;
         if (this.kind) dflts[this.kind] = this.dflt ?? dflts[this.kind];
@@ -2760,7 +2762,7 @@ export default class Chat extends View {
         const offline = this.machine && !online(this.machine) ? this.machine : null;
         const currentRow = agent.rowFor(c.agent, c);
         // Installed agents only (and always the one running).
-        const menus = Object.fromEntries(["claude", "codex"].filter((k) => k === c.agent || installed[k])
+        const menus = Object.fromEntries(["claude", "codex", "pi"].filter((k) => k === c.agent || installed[k])
           .map((k) => [k, agent.menuFor(k, dflts[k], k === c.agent ? currentRow : null)]));
         // As tall as the menu can get (chat-models' sizes): border and padding, another machine's
         // offline line, agent tabs, search, the list (it scrolls past 8 rows), separator, Reasoning header
@@ -2770,7 +2772,7 @@ export default class Chat extends View {
           at: at ? { x: Math.max(8, at.x - W + 90), y: Math.max(8, at.y - H - 10) } : "pointer",
           props: { pane: this.pickKey(), offline, width: W, height: H, select: name ? findModel(menus, name) : null,
             current: { agent: c.agent, model: currentRow, effort: c.effort ?? null, fast: c.fast, perm: c.perm ?? null },
-            menus, icons, permDefault: { claude: dflts.claude?.mode ?? "manual", codex: "auto" } } });
+            menus, icons, permDefault: { claude: dflts.claude?.mode ?? "manual", codex: "auto", pi: null } } });
       } finally {
         this.picking = false;
         cx.notify();

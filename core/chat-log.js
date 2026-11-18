@@ -16,6 +16,23 @@ kind="$1"; pid="$2"
 procs() { if [ -r /proc/self/stat ]; then cat /proc/[0-9]*/stat 2>/dev/null | awk '{ p = $1; sub(/.*\\) /, ""); print p, $2 }'; else ps -axo pid=,ppid= 2>/dev/null; fi; }
 kids() { procs | sort -n | awk -v r="$1" 'function walk(p,  c, m, j) { m = split(k[p], c, " "); for (j = 1; j <= m; j++) if (!(c[j] in s)) { s[c[j]] = 1; print c[j]; walk(c[j]) } } { k[$2] = k[$2] " " $1 } END { s[r] = 1; walk(r) }'; }
 for p in "$pid" $(kids "$pid"); do
+  if [ "$kind" = pi ]; then
+    # pi sets PI_SESSION_FILE in what it starts; its own process only tells its cwd.
+    if [ -n "$3" ]; then
+      for f in "$HOME"/.pi/agent/sessions/*/*_"$3".jsonl; do [ -f "$f" ] && { echo "$f"; exit 0; }; done
+    fi
+    if [ -d "/proc/$p" ]; then
+      f=$(tr '\\0' '\\n' < "/proc/$p/environ" 2>/dev/null | sed -n 's/^PI_SESSION_FILE=//p' | head -1)
+      [ -n "$f" ] && [ -f "$f" ] && { echo "$f"; exit 0; }
+    fi
+    cwd=$(lsof -a -p "$p" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
+    if [ -n "$cwd" ]; then
+      dir="$HOME/.pi/agent/sessions/--$(printf '%s' "$cwd" | sed 's|^/||; s|[/:]|-|g')--"
+      f=$(ls -t "$dir"/*.jsonl 2>/dev/null | head -1)
+      [ -n "$f" ] && { echo "$f"; exit 0; }
+    fi
+    echo "pending"; exit 0
+  fi
   if [ "$kind" = claude ]; then
     j="$HOME/.claude/sessions/$p.json"
     [ -f "$j" ] || continue
@@ -58,6 +75,7 @@ BEGIN { pos = base; first = base; msgs = 0 }
   head = substr(line, 1, 400)
   claude = index(head, "\"isSidechain\":false") && index(line, "\"type\":\"user\",\"message\"")
   codex = index(head, "\"type\":\"response_item\"")
+  pi = index(head, "\"type\":\"message\",\"id\"") || index(head, "\"type\":\"model_change\"") || index(head, "\"type\":\"thinking_level_change\"")
   # A background job (a shell, a watcher, a helper) that ended: Claude Code notes it the moment it
   # ends, as a message queued for the agent (which may read it much later).
   if (index(head, "\"type\":\"queue-operation\",\"operation\":\"enqueue\"") && index(line, "<task-notification>") && index(line, "<status>")) {
@@ -71,10 +89,10 @@ BEGIN { pos = base; first = base; msgs = 0 }
     if (length(line) <= 262144) print off "\tJ\t" line
     next
   }
-  if ((claude && index(line, "\"tool_result\"")) || (codex && (index(head, "\"function_call_output\"") || index(head, "\"custom_tool_call_output\"")))) {
+  if ((claude && index(line, "\"tool_result\"")) || (codex && (index(head, "\"function_call_output\"") || index(head, "\"custom_tool_call_output\""))) || (pi && index(head, "\"role\":\"toolResult\""))) {
     if (count) next
     ids = ""; t = line
-    while (match(t, /"(tool_use_id|call_id)":"[^"]*"/)) { m = substr(t, RSTART, RLENGTH); sub(/^"[a-z_]*":"/, "", m); sub(/"$/, "", m); ids = ids " " m; t = substr(t, RSTART + RLENGTH) }
+    while (match(t, /"(tool_use_id|call_id|toolCallId)":"[^"]*"/)) { m = substr(t, RSTART, RLENGTH); sub(/^"[A-Za-z_]*":"/, "", m); sub(/"$/, "", m); ids = ids " " m; t = substr(t, RSTART + RLENGTH) }
     # A helper (or job) launched to run on its own: its result came at once, it is not done yet.
     if (index(line, "Async agent launched") || index(line, "running in background")) ids = ids " ASYNC"
     # A shell or watcher left running in the background (or moved there mid-run): its task id.
@@ -97,6 +115,8 @@ BEGIN { pos = base; first = base; msgs = 0 }
     if (index(line, "\"type\":\"user\",\"message\"") || index(line, "\"type\":\"assistant\",\"uuid\"") || (index(line, "\"type\":\"attachment\",\"uuid\"") && index(line, "\"queued_command\""))) keep = 1
     # what a /fast run in place said (SHEP-181: the chat shows it runs on Fast at once)
     if (index(head, "\"subtype\":\"local_command\"") && index(line, "local-command-stdout")) keep = 1
+  } else if (pi) {
+    if (index(line, "\"role\":\"user\"") || index(line, "\"role\":\"assistant\"") || index(line, "\"role\":\"toolResult\"") || index(head, "\"type\":\"model_change\"") || index(head, "\"type\":\"thinking_level_change\"")) keep = 1
   } else if (index(head, "\"type\":\"response_item\"")) {
     if (index(head, "\"type\":\"message\"") || index(head, "_call\"")) keep = 1
   } else if (index(head, "\"type\":\"event_msg\"")) {
@@ -109,7 +129,7 @@ BEGIN { pos = base; first = base; msgs = 0 }
   if (count) next
   gsub(/"data":"[^"]*"/, "\"data\":\"\"", line)
   gsub(/"image_url":"data:[^"]*"/, "\"image_url\":\"\"", line)
-  big = (index(line, "\"tool_use\"") || index(head, "_call\"")) ? 32768 : 262144
+  big = (index(line, "\"tool_use\"") || index(head, "_call\"") || index(line, "\"toolCall\"")) ? 32768 : 262144
   if (length(line) > big) {
     nm = ""
     if (match(line, /"name":"[^"]*"/)) nm = substr(line, RSTART + 8, RLENGTH - 9)
@@ -492,6 +512,18 @@ function waitWords(command, description) {
 export const cmdWords = (c) => clip(String(c ?? "").replace(/^(cd [^&;]+(&&|;)\s*)+/, "").split(/\s*(?:&&|\|\||;|\|)\s*/)[0], 48);
 const base = (p) => String(p ?? "").split("/").filter(Boolean).pop() ?? "";
 const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return clip(u, 40); } };
+
+// pi's tool names and arguments as Claude Code's rows: read/bash/edit/write.
+const PI_TOOLS = { read: "Read", bash: "Bash", edit: "Edit", write: "Write" };
+function piStep(name, args = {}) {
+  const n = PI_TOOLS[name];
+  if (!n) return claudeStep(name, args) ?? { kind: "tool", line: `Used ${name}`, doing: `Using ${name}` };
+  const input = name === "read" ? { file_path: args.path }
+    : name === "edit" ? { file_path: args.path, old_string: args.oldText, new_string: args.newText }
+    : name === "write" ? { file_path: args.path, content: args.content }
+    : { command: args.command, description: args.description, run_in_background: args.run_in_background };
+  return claudeStep(n, input) ?? { kind: "tool", line: `Used ${name}`, doing: `Using ${name}` };
+}
 
 // One tool call in words: its kind (for the summary), a line for the open row, and what it is
 // doing (for the working line: "Editing main.js", "Run the auth tests").
@@ -880,12 +912,12 @@ export class Conversation {
         // A call too big to send whole: its name and small fields ("file_path=…").
         const [name, ...fields] = r.data.split("\x1f");
         const input = Object.fromEntries(fields.map((f) => { const i = f.indexOf("="); let v = f.slice(i + 1); try { v = JSON.parse(`"${v.replace(/\\$/, "")}"`); } catch {} return [f.slice(0, i), v]; }));
-        if (name) this.step(`big${r.off}`, r.off, claudeStep(name, input) ?? { kind: "tool", line: `Used ${name}`, doing: "Working" });
+        if (name) this.step(`big${r.off}`, r.off, (this.kind === "pi" ? piStep(name, input) : claudeStep(name, input)) ?? { kind: "tool", line: `Used ${name}`, doing: "Working" });
         continue;
       }
       const l = parse(r.data);
       if (!l || typeof l !== "object") continue;
-      if (this.kind === "codex") this.codex(l, r.off); else this.claude(l, r.off);
+      if (this.kind === "codex") this.codex(l, r.off); else if (this.kind === "pi") this.pi(l, r.off); else this.claude(l, r.off);
     }
   }
 
@@ -984,6 +1016,66 @@ export class Conversation {
     }
   }
 
+  pi(l, off) {
+    const at = time(l.timestamp);
+    if (l.type === "model_change") {
+      this.meta = { ...this.meta, model: `${l.provider ?? ""}/${l.modelId ?? ""}`.replace(/^\/+/, ""), at };
+      return;
+    }
+    if (l.type === "thinking_level_change") {
+      this.meta = { ...this.meta, effort: l.thinkingLevel ?? this.meta.effort, at };
+      return;
+    }
+    if (l.type !== "message") return;
+    const m = l.message ?? {};
+    if (m.role === "user") {
+      const words = (Array.isArray(m.content) ? m.content : []).filter((b) => b?.type === "text").map((b) => b.text).join("\n\n");
+      const u = words ? cleanUser(words) : null;
+      if (u) this.user(`u${off}`, { ...u, at });
+      return;
+    }
+    if (m.role === "assistant") {
+      if (m.model) this.meta = { ...this.meta, model: `${m.provider ?? ""}/${m.model}`.replace(/^\/+/, ""),
+        effort: m.thinkingLevel ?? this.meta.effort, used: m.usage?.totalTokens ?? this.meta.used, at };
+      if (m.stopReason === "error" && m.errorMessage) this.push({ kind: "error", id: `e${off}`, text: String(m.errorMessage) });
+      const id = String(l.id ?? off);
+      for (const b of Array.isArray(m.content) ? m.content : []) {
+        if (b?.type === "thinking") { if (!this.open.size) this.doing = "Thinking"; continue; }
+        if (b?.type === "text") {
+          const said = this.agentText(b.text ?? "");
+          if (!said) continue;
+          const prev = this.replies.get(id);
+          if (prev && this.items[this.items.length - 1] === prev) {
+            prev.text += "\n\n" + said;
+            delete prev.suggest;
+            Object.assign(prev, this.takeSuggest());
+          } else {
+            const item = { kind: "agent", id: `a${off}`, text: said, at, ...this.takeSuggest() };
+            this.replies.set(id, item);
+            this.push(item);
+          }
+        } else if (b?.type === "toolCall") {
+          const cid = String(b.id ?? `c${off}`);
+          if (b.name === "question" || b.name === "ask_user") {
+            const qs = b.arguments?.questions ?? b.arguments?.question ?? b.arguments;
+            const text = Array.isArray(qs) ? qs.map((q) => q?.question ?? q).filter(Boolean).join("\n\n") : String(qs ?? "");
+            if (text) this.asked(cid, { kind: "ask", id: `q${off}`, text });
+            this.open.set(cid, "Asking you something");
+            this.doing = "Asking you something";
+          } else {
+            const st = piStep(String(b.name ?? ""), b.arguments ?? {});
+            if (st) st.at = at;
+            this.step(cid, off, st);
+            if (ARTIFACT.test(String(b.arguments?.command ?? ""))) this.push({ kind: "artifact", id: `art${off}`, at });
+            if (b.name === "bash") this.sent(b.arguments?.command ?? "", off, at);
+          }
+        }
+      }
+      return;
+    }
+    if (m.role === "toolResult") this.done(String(m.toolCallId ?? ""), off);
+  }
+
   codex(l, off) {
     const p = l.payload;
     if (!p || typeof p !== "object") return;
@@ -1068,6 +1160,10 @@ export function resultText(line, id) {
     if (Array.isArray(c)) {
       const b = c.find((x) => x?.type === "tool_result" && x.tool_use_id === id) ?? c.find((x) => x?.type === "tool_result");
       const v = b?.content;
+      text = typeof v === "string" ? v : Array.isArray(v) ? v.map((x) => x?.text ?? "").join("\n") : null;
+    }
+    if (text === null && l.message?.role === "toolResult") {
+      const v = l.message.content;
       text = typeof v === "string" ? v : Array.isArray(v) ? v.map((x) => x?.text ?? "").join("\n") : null;
     }
     const o = l.payload?.output;

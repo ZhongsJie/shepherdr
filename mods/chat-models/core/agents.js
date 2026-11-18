@@ -2,7 +2,9 @@
 // rules both the window's model menu (lib/agent.js, mods/chat-models) and the web app's use. Reading an agent's own
 // settings and restarting it run where each side runs commands (lib/agent.js, service/agents.ts).
 // Shared core: the source is core/agents.js; bin/sync-shared copies it into the mods in lib/COPIES.
-export const NAMES = { claude: "Claude Code", codex: "Codex" };
+export const AGENTS = ["claude", "codex", "pi"];
+export const NAMES = { claude: "Claude Code", codex: "Codex", pi: "Pi" };
+const PI_EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 // Claude Code's current models, as its /model menu offers them. `id` is what --model gets;
 // `match` the names a running agent may report for it.
@@ -20,6 +22,8 @@ const PERMS = {
   claude: [{ id: "manual", label: "Ask" }, { id: "auto", label: "Auto" }, { id: "acceptEdits", label: "Accept edits" },
     { id: "plan", label: "Plan" }, { id: "bypassPermissions", label: "Full access" }],
   codex: [{ id: "read-only", label: "Read only" }, { id: "auto", label: "Auto" }, { id: "full", label: "Full access" }],
+  // pi has no per-tool permission modes; its tools are chosen with --tools
+  pi: [],
 };
 // A permission mode carried to the other agent when the agent is switched: its nearest mode there (auto stays auto,
 // full access stays full access, Claude's accept edits is Codex's auto, plan and read only swap), else that agent's
@@ -69,6 +73,10 @@ export const DEFAULTS = `
 if [ "$1" = claude ]; then
   f="$HOME/.claude/settings.json"
   command -v jq >/dev/null && [ -f "$f" ] && jq -r '"model\\t\\(.model // "")", "effort\\t\\(.effortLevel // "")", "fast\\t\\(if .fastMode == true then "on" else "" end)", "per\\t\\(.modelSettings // {} | with_entries(.value |= (.effortLevel // null)) | tojson)", "mode\\t\\(.permissions.defaultMode // "")"' "$f" 2>/dev/null
+elif [ "$1" = pi ]; then
+  f="$HOME/.pi/agent/settings.json"
+  command -v jq >/dev/null && [ -f "$f" ] && jq -r '"model\\t\\(.defaultProvider // "")/\\(.defaultModel // "")", "effort\\t\\(.defaultThinkingLevel // "")"' "$f" 2>/dev/null
+  command -v pi >/dev/null 2>&1 && pi --list-models 2>/dev/null | sed '1d' | while IFS= read -r l; do printf 'piModel\\t%s\\n' "$l"; done
 else
   f="$HOME/.codex/config.toml"
   for k in model model_reasoning_effort service_tier sandbox_mode approval_policy; do
@@ -83,12 +91,36 @@ function parsePer(text) {
   try { return JSON.parse(text || "{}") ?? {}; } catch { return {}; }
 }
 
+// pi's --list-models table row: provider, model, context, max-out, thinking, images (two spaces apart).
+function piModel(line) {
+  const c = String(line ?? "").trim().split(/\s{2,}/);
+  if (c.length < 3 || c[0] === "provider" || !c[0] || !c[1]) return null;
+  const [provider, model, context, , thinking] = c;
+  return { id: `${provider}/${model}`, name: model, provider, efforts: thinking === "yes" ? PI_EFFORTS : [],
+    defaultEffort: null, fast: false, window: windowOf(context) };
+}
+// "1M" or "983.6K" as tokens.
+function windowOf(words) {
+  const m = /^([\d.]+)\s*([KM])?$/i.exec(String(words ?? "").trim());
+  if (!m) return null;
+  return Math.round(Number(m[1]) * (m[2] ? (m[2].toUpperCase() === "M" ? 1e6 : 1e3) : 1));
+}
+
 // The agent's own settings, from DEFAULTS' output on its machine.
 export function parseDefaults(kind, stdout) {
   const out = {};
   for (const line of (stdout ?? "").split("\n")) {
     const t = line.indexOf("\t");
     if (t > 0) out[line.slice(0, t)] = line.slice(t + 1);
+  }
+  const piModels = [];
+  for (const line of (stdout ?? "").split("\n")) {
+    const t = line.indexOf("\t");
+    if (t > 0 && line.slice(0, t) === "piModel") piModels.push(line.slice(t + 1));
+  }
+  if (kind === "pi") {
+    const model = (out.model || "").replace(/^\/+/, "") || null;
+    return { model, effort: out.effort || null, models: piModels.map(piModel).filter(Boolean) };
   }
   let models = null;
   if (out.models) {
@@ -126,6 +158,13 @@ export function current(kind, argv, meta, dflt) {
     return { agent: "claude", model: meta.model ?? alias, alias, effort: meta.effort ?? flag(argv, "--effort") ?? per ?? dflt.effort,
       fast: Boolean(fast), perm: perm === "default" ? "manual" : perm, used: meta.used ?? null, window: meta.window ?? (big ? 1000000 : 200000) };
   }
+  if (kind === "pi") {
+    const model = meta.model ?? flag(argv, "--model") ?? dflt.model;
+    const m = (dflt.models ?? []).find((x) => x.id === model || x.id.endsWith(`/${model}`) || x.name === model);
+    return { agent: "pi", model: m?.id ?? model, label: m?.name ?? null,
+      effort: meta.effort ?? flag(argv, "--thinking") ?? dflt.effort, fast: false, perm: null,
+      used: meta.used ?? null, window: meta.window ?? m?.window ?? null };
+  }
   const o = overrides(argv);
   const tier = o.service_tier;
   const model = meta.model ?? flag(argv, "-m", "--model") ?? o.model ?? dflt.model;
@@ -138,7 +177,7 @@ export function current(kind, argv, meta, dflt) {
 }
 
 // An effort level as the person reads it: "xhigh" -> "Extra high". The CLIs still get the raw value.
-const LEVELS = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
+const LEVELS = { off: "Off", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
 export function levelName(e) {
   return e ? LEVELS[e] ?? e[0].toUpperCase() + e.slice(1) : null;
 }
@@ -167,6 +206,15 @@ export function menuFor(agent, dflt, current = null) {
     if (current && !models.some((m) => m.id === current)) models.unshift({ id: current, name: modelName(current), efforts: CLAUDE_EFFORTS, defaultEffort: dflt?.effort ?? null, fast: false });
     return { name: NAMES.claude, perms: PERMS.claude, models };
   }
+  if (agent === "pi") {
+    const all = (dflt?.models ?? []).map((m) => ({ id: m.id, name: m.name ?? m.id, efforts: m.efforts ?? [],
+      defaultEffort: m.defaultEffort ?? dflt?.effort ?? null, fast: false }));
+    if (dflt?.model && !all.some((m) => m.id === dflt.model))
+      all.unshift({ id: dflt.model, name: String(dflt.model).split("/").pop(), efforts: PI_EFFORTS, defaultEffort: dflt.effort ?? null, fast: false });
+    if (current && !all.some((m) => m.id === current))
+      all.unshift({ id: current, name: String(current).split("/").pop(), efforts: PI_EFFORTS, defaultEffort: dflt?.effort ?? null, fast: false });
+    return { name: NAMES.pi, perms: PERMS.pi, models: all };
+  }
   const all = (dflt?.models ?? []).map((m) => ({ id: m.id, name: m.label, efforts: m.efforts?.length ? m.efforts : ["low", "medium", "high", "xhigh"],
     defaultEffort: m.defaultEffort ?? dflt?.effort ?? null, fast: m.fast }));
   if (current && !all.some((m) => m.id === current)) all.unshift({ id: current, name: current, efforts: ["low", "medium", "high", "xhigh"], defaultEffort: dflt?.effort ?? null, fast: false });
@@ -175,7 +223,9 @@ export function menuFor(agent, dflt, current = null) {
 
 // The levels a model typed by id gets: its agent's usual ones.
 export function typedModel(agent, id) {
-  return { id, name: agent === "claude" ? modelName(id) : id, efforts: agent === "claude" ? CLAUDE_EFFORTS : ["low", "medium", "high", "xhigh"], defaultEffort: null, fast: false, typed: true };
+  return { id, name: agent === "claude" ? modelName(id) : agent === "pi" ? String(id).split("/").pop() : id,
+    efforts: agent === "claude" ? CLAUDE_EFFORTS : agent === "pi" ? PI_EFFORTS : ["low", "medium", "high", "xhigh"],
+    defaultEffort: null, fast: false, typed: true };
 }
 
 // The person's picks in the model menus (the window's and the web's alike), in PICKS_FILE under the
@@ -277,11 +327,15 @@ const CLAUDE_VALUE = new Set(["--add-dir", "--mcp-config", "--append-system-prom
   "--fallback-model", "--output-format", "--input-format", "--name", "--setting-sources", "--betas", "--debug-file"]);
 const CODEX_VALUE = new Set(["-c", "--config", "-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval",
   "-C", "--cd", "--add-dir", "-i", "--image", "--enable", "--disable", "--local-provider", "--oss"]);
+const PI_DROP = new Set(["--model", "--thinking", "--session", "--session-id", "--fork", "--continue", "-c", "--resume", "-r"]);
+const PI_VALUE = new Set(["--provider", "--api-key", "--system-prompt", "--append-system-prompt", "--mode", "--session-dir",
+  "--name", "-n", "--models", "--tools", "-t", "--exclude-tools", "-xt", "--extension", "-e", "--skill",
+  "--prompt-template", "--theme", "--use-theme", "--export", "--tui-mode"]);
 
 // Where the agent's own word (claude, codex) is in argv: a terminal's argv starts with what launched it (nice,
 // sh -c, env, the person's `bash -ic`), whose words are no agent flags (#1001: its -ic was Codex's `-i c`, an image).
 function agentAt(argv) {
-  return argv.findIndex((a, i) => (i === 0 || !String(a).startsWith("-")) && /^(claude|codex)$/.test(String(a).split("/").pop()));
+  return argv.findIndex((a, i) => (i === 0 || !String(a).startsWith("-")) && /^(claude|codex|pi)$/.test(String(a).split("/").pop()));
 }
 
 // The old agent's flags worth keeping (permissions, folders, ...), without what is chosen again
@@ -296,6 +350,11 @@ function kept(kind, argv) {
       if (CLAUDE_DROP.has(a)) { if (rest[i + 1] && !rest[i + 1].startsWith("-")) i++; continue; }
       if ([...CLAUDE_DROP].some((f) => a.startsWith(f + "="))) continue;
       if (CLAUDE_VALUE.has(a)) { out.push(a, rest[++i]); continue; }
+      if (a.startsWith("-")) out.push(a);
+    } else if (kind === "pi") {
+      if (PI_DROP.has(a)) { if (rest[i + 1] && !rest[i + 1].startsWith("-")) i++; continue; }
+      if ([...PI_DROP].some((f) => a.startsWith(f + "="))) continue;
+      if (PI_VALUE.has(a)) { out.push(a, rest[++i]); continue; }
       if (a.startsWith("-")) out.push(a);
     } else {
       if (i === 0 && (a === "resume" || a === "fork")) { if (rest[1] && !rest[1].startsWith("-")) i++; continue; }
@@ -332,6 +391,15 @@ function stripSession(kind, argv) {
       if (a === "--continue" || a === "-c") { resumed = true; continue; }
       if (a === "--fork-session") continue;
       if (CLAUDE_VALUE.has(a) || ["--model", "--effort", "--settings", "--permission-mode"].includes(a)) { out.push(a, rest[++i]); continue; }
+    } else if (kind === "pi") {
+      if (["--session", "--session-id", "--fork"].includes(a)) {
+        if (a !== "--session-id") resumed = true;
+        if (rest[i + 1] && !rest[i + 1].startsWith("-")) i++;
+        continue;
+      }
+      if (/^--(session|session-id|fork)=/.test(a)) { if (!a.startsWith("--session-id")) resumed = true; continue; }
+      if (a === "--continue" || a === "-c" || a === "--resume" || a === "-r") { resumed = true; continue; }
+      if (PI_VALUE.has(a) || a === "--model" || a === "--thinking") { out.push(a, rest[++i]); continue; }
     } else {
       if (i === 0 && (a === "resume" || a === "fork")) { resumed = true; continue; }
       if (a === "--last") continue;
@@ -358,6 +426,15 @@ export function argvFor(pick, old) {
     if (same && old.session) return { argv: [...a, "--resume", old.session], resume: true, base: a };
     return { argv: a, resume: false, base: a };
   }
+  if (pick.agent === "pi") {
+    const a = ["pi", ...flags];
+    if (pick.model) a.push("--model", pick.model);
+    if (pick.effort) a.push("--thinking", pick.effort);
+    if (same && old.session) return { argv: [...a, "--session", old.session], resume: true, base: a };
+    const session = newSessionId();
+    // A fresh id every start, so the chat and herdr-task can find this session's log at once.
+    return { argv: [...a, "--session-id", session], resume: false, base: a, session };
+  }
   // Codex runs its commands outside hc without --no-daemon (as herdr-task and restart.sh add).
   const a = [...flags, "--no-daemon"];
   if (pick.model) a.push("-m", pick.model);
@@ -373,7 +450,10 @@ export function argvFor(pick, old) {
 
 // The conversation's id, from its log's file name.
 export function sessionOf(kind, path) {
-  const m = kind === "claude" ? /([0-9a-f-]{36})\.jsonl$/.exec(path ?? "") : /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/.exec(path ?? "");
+  const re = kind === "claude" ? /([0-9a-f-]{36})\.jsonl$/
+    : kind === "pi" ? /_([0-9a-f-]{36})\.jsonl$/
+    : /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
+  const m = re.exec(path ?? "");
   return m ? m[1] : null;
 }
 
@@ -384,19 +464,32 @@ export function resumeArgv(kind, argv, session) {
   return kind === "claude" ? [...out, "--resume", session] : [out[0], "resume", ...out.slice(1), session];
 }
 
+function newSessionId() {
+  const c = globalThis.crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    return (ch === "x" ? r : (r & 3) | 8).toString(16);
+  });
+}
+
 // A copy of the conversation in a new tab beside this one, through the CLI's own fork.
 export function forkArgv(kind, argv, session) {
   argv = argv ?? [];
   // The same model, effort and speed as the original.
   const same = kind === "claude"
     ? ["--model", "--effort", "--settings"].flatMap((f) => { const v = flag(argv, f); return v ? [f, v] : []; })
+    : kind === "pi"
+    ? ["--model", "--thinking"].flatMap((f) => { const v = flag(argv, f); return v ? [f, v] : []; })
     : (() => {
       const m = flag(argv, "-m", "--model"), o = overrides(argv);
       return [...(m ? ["-m", m] : []), "--no-daemon",
         ...["model_reasoning_effort", "service_tier"].flatMap((k) => (o[k] ? ["-c", `${k}="${o[k]}"`] : []))];
     })();
   const flags = [...kept(kind, argv), ...same];
-  return kind === "claude" ? ["claude", ...flags, "--resume", session, "--fork-session"] : ["codex", "fork", ...flags, session];
+  return kind === "claude" ? ["claude", ...flags, "--resume", session, "--fork-session"]
+    : kind === "pi" ? ["pi", ...flags, "--fork", session]
+    : ["codex", "fork", ...flags, session];
 }
 
 // #1050: a fork of a task's conversation while the task's agent runs works in the same folder, so two agents would

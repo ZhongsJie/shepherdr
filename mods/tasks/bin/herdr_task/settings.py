@@ -12,7 +12,7 @@ from .base import Fail, git, HOME, MAX_RUNNING, WHERE
 
 
 # What each agent key starts by default. Unknown keys run as themselves; --argv overrides.
-AGENTS = {"claude": ["claude"], "codex": ["codex", "--no-daemon"]}
+AGENTS = {"claude": ["claude"], "codex": ["codex", "--no-daemon"], "pi": ["pi"]}
 
 
 # ---- the person's settings ------------------------------------------------------------------
@@ -196,6 +196,14 @@ def argv_for(pick):
         elif perm:
             a += ["-s", "workspace-write", "-a", "on-request"]
         return a
+    if agent == "pi":
+        a = ["pi"]
+        if pick.get("model"):
+            a += ["--model", pick["model"]]
+        if pick.get("effort"):
+            # pi's own words for the levels: off, and the nearest of its names for ours
+            a += ["--thinking", {"none": "off", "lowest": "minimal", "ultra": "max"}.get(pick["effort"], pick["effort"])]
+        return a
     return [agent] if agent else None
 
 
@@ -234,6 +242,8 @@ def argv_model(argv):
             model = nxt
         elif a == "--effort":
             effort = nxt
+        elif a == "--thinking":
+            effort = nxt
         elif a in ("-c", "--config") and nxt.startswith("model_reasoning_effort="):
             effort = nxt.split("=", 1)[1].strip("\"'")
     return model, effort
@@ -270,7 +280,7 @@ MERGE_VALUES = {"ask": "ask", "ask me first": "ask", "ask first": "ask", "ask th
                 "auto": "auto", "on its own": "auto", "merge it": "auto", "at once": "auto"}
 MUST_VALUES = {"blocker": "blocker", "blockers": "blocker", "critical": "blocker", "major": "major",
                "minor": "minor", "trivial": "minor", "everything": "minor"}
-EFFORTS = {"none", "minimal", "lowest", "low", "medium", "high", "xhigh", "max", "ultra"}
+EFFORTS = {"off", "none", "minimal", "lowest", "low", "medium", "high", "xhigh", "max", "ultra"}
 ONOFF = {"on": "on", "yes": "on", "true": "on", "1": "on", "off": "off", "no": "off", "false": "off", "0": "off"}
 
 

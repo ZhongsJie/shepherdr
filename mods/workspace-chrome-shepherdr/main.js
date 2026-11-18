@@ -1,6 +1,6 @@
 import { View, div, image, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { theme, run, props, window, shared, setShared, updates, layout } from "herdr";
+import { theme, run, props, window, shared, setShared, updates } from "herdr";
 import { openSettings, red } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 
@@ -10,26 +10,8 @@ function liveCall() {
   return null;
 }
 
-function find(node, id) {
-  if (node?.id === id) return node;
-  for (const child of node?.children ?? []) {
-    const found = find(child, id);
-    if (found) return found;
-  }
-  return null;
-}
-
-// The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
-const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
-
-// To the rail (on macOS wide enough for the traffic lights), or back to the width it had.
-function toggleSidebar() {
-  const width = find(layout(), "sidebar")?.size?.px;
-  if (!narrow()) setShared("sidebar.width", width);
-  // Mods edited before the rail went by width still read the flag.
-  setShared("sidebar.collapsed", !narrow());
-  run("layout.resize", { id: "sidebar", px: narrow() ? (shared("sidebar.width") ?? 268) : window()?.platform === "macos" ? 76 : 44 });
-}
+// Folding hides the whole sidebar (layout.hide "sidebar"): spaces and the foot go with it, and
+// the tab bar fills the width. The fold/show button lives in the tab bar (mods/tabs-tasks).
 
 export default class WorkspaceChrome extends View {
   button(id, label, action) {
@@ -53,13 +35,13 @@ export default class WorkspaceChrome extends View {
 
   render() {
     const t = theme();
-    const collapsed = narrow();
-    const call = !collapsed && addonOn("voice") ? liveCall() : null;
+    const mac = window()?.platform === "macos" && !window()?.fullscreen;
+    const call = addonOn("voice") ? liveCall() : null;
     if (props()?.footer) {
       const row = (id, icon, label, action) => h_flex().id(id).h(28).px(8).gap(9).items_center().rounded(8)
         .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
         .on_click(action).child(svg(`mods/workspace-chrome-shepherdr/${icon}.svg`).size(14))
-        .when(!collapsed, el => el.child(label));
+        .child(label);
       return v_flex().size_full().bg(t.chrome).border_t(1).border_color(t.border).px(8).pt(4).pb(8).text_size(13)
         // Herdr's own settings, as shipped (with its update dot), then Shepherdr's
         // (mods/shepherdr-settings) under Shepherdr's mark, the crook.
@@ -68,15 +50,12 @@ export default class WorkspaceChrome extends View {
         .child(row("shepherdr", "crook", "Shepherdr", () => openSettings()))
         .child(row("machine", "plus", "Add machine", () => run("mod.open", { name: "machine-add-chat" })));
     }
-    return h_flex().size_full().bg(t.chrome).pl(collapsed ? 6 : 14).pr(10).gap(4).items_center().text_size(13.5)
-      .when(window()?.platform === "macos" && !window()?.fullscreen && !collapsed, el => el.pl(76))
-      .when(!collapsed, el => el.child(h_flex().flex_1().gap(8).items_center().child(image("frame/welcome/herdr.png").size(20).rounded(5)).child(div().font_semibold().text_color(t.foreground).child("Herdr"))))
+    return h_flex().size_full().bg(t.chrome).pl(mac ? 76 : 14).pr(10).gap(4).items_center().text_size(13.5)
+      .child(h_flex().flex_1().gap(8).items_center().child(image("frame/welcome/herdr.png").size(20).rounded(5)).child(div().font_semibold().text_color(t.foreground).child("Herdr")))
       // SHEP-135: the voice call, beside Search: mods/spaces-chat starts it (shared "voice.startreq"); on a call, its
       // Mute and End in their place
       .when(Boolean(call), el => el.child(this.callControls(t, call)))
-      .when(!collapsed && addonOn("voice") && !call, el => el.child(this.button("voice", svg("mods/workspace-chrome-shepherdr/audio-lines.svg").size(15), () => setShared("voice.startreq", { at: Date.now() }))))
-      .when(!collapsed, el => el.child(this.button("search", svg("mods/workspace-chrome-shepherdr/search.svg").size(15), () => run("mod.open", { name: "jump" }))))
-      // On the macOS rail the traffic lights fill the row; the agents list's » unfolds it.
-      .when(!(collapsed && window()?.platform === "macos"), el => el.child(this.button("sidebar-toggle", svg("mods/workspace-chrome-shepherdr/sidebar.svg").size(15), toggleSidebar)));
+      .when(addonOn("voice") && !call, el => el.child(this.button("voice", svg("mods/workspace-chrome-shepherdr/audio-lines.svg").size(15), () => setShared("voice.startreq", { at: Date.now() }))))
+      .child(this.button("search", svg("mods/workspace-chrome-shepherdr/search.svg").size(15), () => run("mod.open", { name: "jump" })));
   }
 }

@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 
 from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, WORKTREES
 from .settings import agent_key, ASSISTANT_TEMPLATES, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
@@ -234,7 +235,9 @@ def own_command(path, text, sandboxed=False):
 REVIEWERS = {"codex": (["codex", "--no-daemon", "--sandbox", "read-only", "--ask-for-approval", "never"],
                        {"--disable": re.compile(r"hooks"), "-m": re.compile(r"[\w.:-]+"),
                         "-c": re.compile(r'projects=\{.*\}|model_reasoning_effort="?\w+"?', re.S)}),
-             "claude": (["claude", "--permission-mode", "plan"], {"--model": re.compile(r"[\w.:\[\]-]+"), "--effort": re.compile(r"\w+")})}
+             "claude": (["claude", "--permission-mode", "plan"], {"--model": re.compile(r"[\w.:\[\]-]+"), "--effort": re.compile(r"\w+")}),
+             "pi": (["pi"], {"--model": re.compile(r"[\w.:/\[\]-]+"), "--thinking": re.compile(r"\w+"),
+                              "--session-id": re.compile(r"[0-9a-f-]{36}"), "--tools": re.compile(r"[\w,-]+")})}
 HELPER = re.compile(r"[\w.-]+-(?:review|helper)(?:-[\w.-]+)?")
 
 
@@ -371,6 +374,8 @@ def resume_argv(argv, session, folder=None):
         return argv + ([] if has else ["--permission-mode", mode]) + ["--resume", session]
     if k == "codex":
         return [argv[0], "resume"] + argv[1:] + [session]
+    if k == "pi":
+        return argv + ["--session", session]
     return None
 
 
@@ -796,6 +801,9 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     herdr.space, which Herdr gives a pane), herdr.agent, herdr.coordinator (its coordinator's tab,
     which keeps it under a restarted coordinator) and herdr.role=reviewer for a reviewer, kept
     apart from the task's agents. Returns its record."""
+    # pi: a known session id on a fresh start, so the chat and herdr-task can find its log at once.
+    if agent_key(argv) == "pi" and not any(a in ("--session", "--session-id") for a in (resume or argv)):
+        argv = [*argv, "--session-id", str(uuid.uuid4())]
     key = s.key(task)
     cmd = list(resume or argv)
     if not role:
@@ -804,6 +812,10 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
         cmd = cmd + [message]
     labels = ["--label", f"herdr.task={key}", "--label", f"herdr.task.space={bare(space)}",
               "--label", f"herdr.agent={agent_key(argv)}"]
+    # pi's own session id (--session-id, or --session when resuming), so the chat finds its log.
+    session = next((cmd[i + 1] for i, a in enumerate(cmd[:-1]) if a in ("--session", "--session-id")), None)
+    if session and agent_key(argv) == "pi":
+        labels += ["--label", f"herdr.session={session}"]
     ctab = coordinator_tab(parent)
     if ctab:
         labels += ["--label", f"herdr.coordinator={ctab}"]
@@ -821,6 +833,8 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     if r.returncode != 0 or not out.get("address"):
         raise Fail((r.stderr or r.stdout).strip() or "hc run failed")
     a = {"address": out["address"], "agent": agent_key(argv), "argv": argv, "at": now()}
+    if session:
+        a["session"] = session
     if parent:
         a["parent"] = parent
     s.dirty = True

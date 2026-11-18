@@ -310,8 +310,8 @@ export default class NewSpace extends View {
         // startAgent), with what is installed there when the one chosen isn't.
         const choice = { ...(shepherdrFor(await readShepherdr(), `m:${this.machine ?? LOCAL_MACHINE}`).coordinator ?? {}) };
         // The tab bar makes it (coordinator.js watchNewSpaces): this dialog goes as the view moves.
-        // Shepherdr settings' "Open the Assistant" off (shared "coordinator.auto" false): settings
-        // null, so the space keeps Herdr's own first tab and gets no Assistant.
+        // Shepherdr settings' "Assistant in new spaces" off — the default — (shared "coordinator.auto"
+        // not true): settings null, so the space keeps Herdr's own first tab, a terminal.
         const assistant = autoCoordinator();
         setShared("newspace.createreq", { folder, machine: this.machine, settings: assistant ? choice : null, icon: this.icon, at: Date.now() });
         this.close();

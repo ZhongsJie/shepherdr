@@ -380,8 +380,8 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const a = chat(b.chat), reader = compat.reader?.(a);
     if (b.type === "restart-info") return compat.agents.info(a, reader);
     if (b.type === "model-menu") return { ok: true, menu: await (compat.agents as any).menu(a, reader) };
-    if (!["claude", "codex"].includes(b.kind)) throw new Error("Pick Claude Code or Codex.");
-    const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : undefined);
+    if (!["claude", "codex", "pi"].includes(b.kind)) throw new Error("Pick Claude Code, Codex or Pi.");
+    const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]/-]{1,120}$/.test(v) ? v : undefined);
     const pick = { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed), perm: opt(b.perm) };
     // the model menu (live): in place when only the model, level or Fast changes; the restart sheet restarts
     if (b.live === true) return { ok: true, ...(await (compat.agents as any).change(a, reader, pick)) };

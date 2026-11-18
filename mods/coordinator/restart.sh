@@ -86,6 +86,13 @@ if [ "$role" = coordinator ]; then
   fi
 fi
 
+# pi's session id: the one the new argv starts (--session-id), else the old agent's label (a resume).
+sess=""
+if [ -n "$argv" ]; then
+  idx=$(jq -r 'to_entries[] | select(.value == "--session-id") | .key' <<<"$argv" 2>/dev/null | head -1)
+  [ -n "$idx" ] && sess=$(jq -r ".[$((idx + 1))]" <<<"$argv" 2>/dev/null)
+fi
+[ -z "$sess" ] && sess=$(get '.labels["herdr.session"]')
 if [ -n "$tab" ]; then
   labels=(--label "herdr.space=$space" --label "herdr.tab=$tab")
 else
@@ -95,6 +102,7 @@ else
   v=$(get '.labels["herdr.coordinator.space"]'); [ -n "$v" ] && labels+=(--label "herdr.coordinator.space=$v")
 fi
 [ "$role" = coordinator ] && labels+=(--label herdr.role=coordinator)
+[ -n "$sess" ] && labels+=(--label "herdr.session=$sess")
 # An agent in Chat mode (parked behind a chat pane) restarts parked behind the same chat.
 chat=${HERDR_RESTART_CHAT:-$(get '.labels["herdr.chat"]')}
 # The label holds the pane as its own machine names it, never a window's "<machine>/<pane>" (#761).
@@ -102,6 +110,7 @@ chat=${chat##*/}
 if [ -n "$chat" ]; then
   origin=$(get '.labels["herdr.chat.origin"]'); origin=${origin:-$old}
   labels=(--keep --label "herdr.chat=$chat" --label "herdr.chat.origin=$origin")
+  [ -n "$sess" ] && labels+=(--label "herdr.session=$sess")
   # What a coordinator chat finds its agent by (mods/chat), and where the coordinator lives.
   for k in herdr.chat.slot herdr.coordinator.space herdr.coordinator.tab; do
     v=$(get ".labels[\"$k\"]"); [ -n "$v" ] && labels+=(--label "$k=$v")

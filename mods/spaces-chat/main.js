@@ -25,7 +25,7 @@ import { unreadSpaces, readShown } from "./unread.js";
 import { muted } from "./notify.js";
 import { MachinePopup, openMachine, openMachineSettings } from "./machine-popup.js";
 import { startPolling, allStats, healthMeters, bars } from "./machines.js";
-import { countBadge, red, green, H, TEXT, RADIUS, toast } from "./ui.js";
+import { countBadge, red, green, amber, H, TEXT, RADIUS, toast } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 import { spaceName, gitTail, tilde, sharedNames, inOrder, withOrder, machinesInOrder, machineOrderOf, withMachineOrder } from "./core/spaces.js";
 import { coordinatorTab } from "./coordinator.js";
@@ -78,13 +78,22 @@ const FALLBACK = 60000;
 // that draws space avatars): one strong color per hue, light and dark alike.
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 
-// A space speaks up only when something in it needs you.
-export function glyph(status) {
-  return status === "blocked" || status === "done" ? "●" : "·";
-}
-
-export function tone(t, status) {
-  return t[status] ?? t.unknown;
+// A space's work status (its most urgent agent: blocked > done > working, else idle), as a dot
+// whose color and shape tell the states apart. The colors are the counts' own (ui.js):
+//   working  amber, breathing   — an agent is at work
+//   blocked  solid red         — something needs the person
+//   done     solid green       — an agent finished, worth a look
+//   idle     a quiet grey ring — nothing going on (same slot, so nothing moves)
+// Every dot sits in a 10px slot, so the row never shifts when a space's status changes.
+export function statusDot(status, t) {
+  const dot = (size, radius) => div().size(size).flex_none().rounded(radius);
+  const slot = () => div().size(10).flex_none().flex().items_center().justify_center();
+  switch (status) {
+    case "working": return slot().child(dot(8, 4).bg(amber()).loop("opacity", { from: 0.35, to: 1, period: 1100 }));
+    case "blocked": return slot().child(dot(8, 4).bg(red()));
+    case "done": return slot().child(dot(8, 4).bg(green()));
+    default: return slot().child(dot(8, 4).border(1.5).border_color(t.dim));
+  }
 }
 
 // A space's name (or its number on the rail): bold and bright while its Assistant has something
@@ -783,6 +792,7 @@ export default class Spaces extends View {
           .when(!tree, el => el.child(div().w(18).flex_none().text_center().text_size(iconOf(w.id) ? 14 : 15).text_color(fresh ? t.foreground : w.active && !quiet ? t.muted : t.dim)
             .when(quiet && Boolean(iconOf(w.id)), (el) => el.opacity(0.5)).child(iconOf(w.id) ?? "#")))
           .child(nameText(name, fresh, quiet ? t.dim : w.active ? t.foreground : t.muted, t))
+          .child(statusDot(w.status, t))
           .when(Boolean(this.pilotMark(w, t)), (el) => el.child(this.pilotMark(w, t)))
           .child(g ? this.gitTail(g, tree, name, t, label) : h_flex().flex_1().min_w(0).justify_end().text_size(TEXT.label).text_color(t.dim)
             .when(Boolean(label), (el) => el.child(div().min_w(0).truncate().child(label))))
@@ -808,7 +818,7 @@ export default class Spaces extends View {
       .hover((s) => s.bg(t.hover))
       .on_click(() => run("space.select", { id: w.id }))
       .child(nameText(String(i + 1), this.unread.has(w.id), muted(w.id) ? t.dim : w.active ? t.foreground : t.muted, t))
-      .child(div().text_color(tone(t, w.status)).child(glyph(w.status)));
+      .child(statusDot(w.status, t));
   }
 
   close() { this.popup?.close?.(); }

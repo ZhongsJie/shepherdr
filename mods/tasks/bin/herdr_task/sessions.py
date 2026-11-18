@@ -152,7 +152,8 @@ def _words(content):
 
 def _start(path):
     """(when, first message) a log starts with: Claude Code's first user entry, Codex's session_meta
-    and first user message. (None, "") if it has none in its first lines."""
+    and first user message, pi's session header and first user message. (None, "") if it has none in
+    its first lines."""
     at, said = None, ""
     try:
         with open(path, errors="replace") as f:
@@ -164,6 +165,11 @@ def _start(path):
                 except ValueError:
                     continue
                 p = o.get("payload") or {}
+                if o.get("type") == "session":
+                    at = at or _ms(o.get("timestamp"))
+                if o.get("type") == "message" and (o.get("message") or {}).get("role") == "user":
+                    at = at or _ms(o.get("timestamp"))
+                    said = _words((o.get("message") or {}).get("content"))
                 if o.get("type") == "session_meta":
                     at = at or _ms(p.get("timestamp") or o.get("timestamp"))
                 elif o.get("type") == "user" and not o.get("isMeta"):
@@ -185,10 +191,18 @@ def project_dir(folder):
     return os.path.join(HOME, ".claude", "projects", re.sub(r"[^A-Za-z0-9]", "-", folder))
 
 
+def pi_dir(folder):
+    """pi's sessions folder for a cwd: --<cwd without its leading /, / and : as ->--."""
+    safe = re.sub(r"^[/\\]", "", os.path.realpath(str(folder))).replace("/", "-").replace(":", "-")
+    return os.path.join(HOME, ".pi", "agent", "sessions", f"--{safe}--")
+
+
 def log_by_session(kind, sid):
     import glob
     if kind == "codex":
         found = glob.glob(os.path.join(HOME, ".codex", "sessions", "*", "*", "*", f"rollout-*{sid}.jsonl"))
+    elif kind == "pi":
+        found = glob.glob(os.path.join(HOME, ".pi", "agent", "sessions", "*", f"*_{sid}.jsonl"))
     else:
         found = glob.glob(os.path.join(HOME, ".claude", "projects", "*", sid + ".jsonl"))
     return found[0] if found else None
@@ -199,7 +213,7 @@ def find_log(a, ref, folders, taken=()):
     or None: by its session when it has one, else the earliest log of its kind that started from
     its launch on (until it ended) and whose first message names its task."""
     import glob
-    kind = "codex" if a.get("agent") == "codex" else "claude"
+    kind = "pi" if a.get("agent") == "pi" else "codex" if a.get("agent") == "codex" else "claude"
     if a.get("session"):
         return log_by_session(kind, a["session"])
     at = a.get("at")
@@ -210,6 +224,8 @@ def find_log(a, ref, folders, taken=()):
         import datetime
         days = {datetime.date.fromtimestamp((at + d) / 1000) for d in (-86400000, 0, 86400000)}
         files = [f for day in days for f in glob.glob(os.path.join(HOME, ".codex", "sessions", f"{day:%Y}", f"{day:%m}", f"{day:%d}", "rollout-*.jsonl"))]
+    elif kind == "pi":
+        files = [f for d in dict.fromkeys(x for x in folders if x) for f in glob.glob(os.path.join(pi_dir(d), "*.jsonl"))]
     else:
         files = [f for d in dict.fromkeys(x for x in folders if x) for f in glob.glob(os.path.join(project_dir(d), "*.jsonl"))]
     named = re.compile(rf"(?<![\w-]){re.escape(ref)}(?![\w-])")

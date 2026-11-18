@@ -44,11 +44,14 @@ CLAUDE_VALUE = {"--add-dir", "--mcp-config", "--append-system-prompt", "--system
                 "--model", "--effort", "--settings", "--permission-mode"}
 CODEX_VALUE = {"-c", "--config", "-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval",
                "-C", "--cd", "--add-dir", "-i", "--image", "--enable", "--disable", "--local-provider", "--oss"}
+PI_VALUE = {"--provider", "--api-key", "--system-prompt", "--append-system-prompt", "--mode", "--session-dir",
+            "--name", "-n", "--models", "--tools", "-t", "--exclude-tools", "-xt", "--extension", "-e", "--skill",
+            "--prompt-template", "--theme", "--use-theme", "--export", "--tui-mode"}
 
 
 def kind_of(word):
     b = os.path.basename(str(word))
-    return b if b in ("claude", "codex") else None
+    return b if b in ("claude", "codex", "pi") else None
 
 
 def base_argv(argv):
@@ -70,6 +73,17 @@ def base_argv(argv):
                 i += 1
                 continue
             if a in CLAUDE_VALUE and i + 1 < len(rest):
+                out += [a, rest[i + 1]]
+                i += 2
+                continue
+        elif kind == "pi":
+            if a in ("--session", "--session-id", "--fork"):
+                i += 2 if i + 1 < len(rest) and not rest[i + 1].startswith("-") else 1
+                continue
+            if re.match(r"^--(session|session-id|fork)=", a) or a in ("--continue", "-c", "--resume", "-r"):
+                i += 1
+                continue
+            if (a in PI_VALUE or a in ("--model", "--thinking")) and i + 1 < len(rest):
                 out += [a, rest[i + 1]]
                 i += 2
                 continue
@@ -96,6 +110,8 @@ def resume_argv(kind, argv, session, message=None):
     tail = [message] if message else []
     if kind == "claude":
         return [*argv, "--resume", session, *tail]
+    if kind == "pi":
+        return [*argv, "--session", session, *tail]
     return [argv[0], "resume", *argv[1:], session, *tail]
 
 

@@ -56,9 +56,9 @@ export function coordinatorTab(space, all = terminals(), ps = null) {
   return space.tabs.find((t) => coordinatorIn(t.id, all, ps) || slotIn(t.id, slots, ps)) ?? null;
 }
 
-// Whether new spaces get a coordinator tab: on unless shared "coordinator.auto" is false (no UI;
-// set it by hand to turn it off).
-export const autoCoordinator = () => shared("coordinator.auto") !== false;
+// Whether new spaces get a coordinator tab: off unless shared "coordinator.auto" is true (the Window page's
+// "Assistant in new spaces" switch, default off).
+export const autoCoordinator = () => shared("coordinator.auto") === true;
 
 // Whose worker a terminal is: its coordinator's address, or its parent's.
 export function parentOf(k, all = terminals()) {

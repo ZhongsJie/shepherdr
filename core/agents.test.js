@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { argvFor, current, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent } from "./agents.js";
+import { argvFor, current, forkArgv, FORK_LIVE, freshArgv, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, sessionOf, withPin, withRecent } from "./agents.js";
 
 const codex = { models: Array.from({ length: 250 }, (_, i) => ({ id: `gpt-${i}`, label: `GPT ${i}`, efforts: ["low", "high"] })) };
 const menus = { claude: menuFor("claude", {}), codex: menuFor("codex", codex) };
@@ -127,4 +127,23 @@ test("an ended Codex Assistant resumes with codex resume <session>", () => {
 
 test("an Assistant that was itself resumed resumes the session it ran last, once", () => {
   expect(resumeArgv("claude", ["claude", "--resume", "old-id", "--model", "opus"], "new-id")).toEqual(["claude", "--model", "opus", "--resume", "new-id"]);
+});
+
+test("pi: its own models, thinking levels, and a session per start", () => {
+  const out = "model\tp/m\neffort\thigh\npiModel\tp  m  1M  384K  yes  yes\npiModel\tq  n  256K  25K  no  no\n";
+  const d = parseDefaults("pi", out);
+  expect(d).toMatchObject({ model: "p/m", effort: "high" });
+  const menu = menuFor("pi", d);
+  expect(menu.models.map((m) => [m.id, m.efforts])).toEqual([["p/m", ["off", "minimal", "low", "medium", "high", "xhigh", "max"]], ["q/n", []]]);
+  const a = argvFor({ agent: "pi", model: "p/m", effort: "off" }, { agent: null, argv: [] });
+  expect(a.argv.slice(0, 5)).toEqual(["pi", "--model", "p/m", "--thinking", "off"]);
+  expect(a.resume).toBe(false);
+  expect(a.session).toMatch(/^[0-9a-f-]{36}$/);
+  expect(a.argv.slice(-2)).toEqual(["--session-id", a.session]);
+  expect(current("pi", a.argv, {}, d)).toMatchObject({ agent: "pi", model: "p/m", effort: "off" });
+  const r = argvFor({ agent: "pi", model: "p/m", effort: "low" }, { agent: "pi", argv: a.argv, session: a.session });
+  expect(r.resume).toBe(true);
+  expect(r.argv.slice(-2)).toEqual(["--session", a.session]);
+  expect(freshArgv("pi", r.argv)).toEqual(["pi", "--model", "p/m", "--thinking", "low"]);
+  expect(sessionOf("pi", `/x/2026-01-01T00-00-00-000Z_${a.session}.jsonl`)).toBe(a.session);
 });

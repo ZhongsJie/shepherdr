@@ -13,12 +13,13 @@ export const CLAUDE_SETTINGS = ".claude/settings.json";
 export const CODEX_CONFIG = ".codex/config.toml";
 const CLAUDE_KEYS = ["model", "effortLevel", "fastMode", "modelSettings"];
 const CODEX_KEYS = ["model", "model_reasoning_effort", "service_tier"];
-const LEVEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
+const LEVEL = { off: "Off", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
 
 /** Whether the change from what runs (`from`: { agent, model, effort, fast, perm }) to `to` can happen in place:
  *  the same CLI and the same permission mode. */
 export function liveOK(from, to) {
-  return !!from && !!to && from.agent === to.agent && (!to.perm || !from.perm || to.perm === from.perm);
+  // pi has no in-place model switch here yet: a change restarts it on the new choice.
+  return !!from && !!to && from.agent === to.agent && from.agent !== "pi" && (!to.perm || !from.perm || to.perm === from.perm);
 }
 
 /** What changes: { model, effort, fast } (each only when it differs; model/effort '' for the CLI's default). A new

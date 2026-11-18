@@ -7,7 +7,7 @@ place, never overwrites what you made yourself, and keeps a backup of anything i
 
 - macOS or Linux, the Herdr app 0.1.12 or newer (`herdr-app --version`) with herdr-core 0.1.17 or newer
   (`hc --version`). Open Herdr once first, so it writes its home (`~/.config/herdr-app`).
-- python3 3.8 or newer, git, and Claude Code or Codex, installed and signed in.
+- python3 3.8 or newer, git, and Claude Code, Codex or pi, installed and signed in.
 - bun (the service and the web app; the installer installs it from bun.sh when it's missing), and Tailscale for the
   web app.
 - Optional, per add-on: `gh` (pull requests), node (the task browser in the window), bun,

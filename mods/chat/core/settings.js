@@ -3,7 +3,7 @@
 // web app's Settings say the same. herdr-task reads the file (herdr_task/settings.py: settings_for); its defaults are
 // DEFAULTS there and here.
 // Shared core: the source is core/settings.js; bin/sync-shared copies it into the mods in lib/COPIES.
-import { NAMES, levelName, current, rowFor, menuFor, permAcross } from "./agents.js";
+import { AGENTS, NAMES, levelName, current, rowFor, menuFor, permAcross } from "./agents.js";
 import { SERVE } from "./host.js";
 
 // ---- the frame -------------------------------------------------------------------------------------------------
@@ -83,7 +83,8 @@ export const USE_OTHER_CLI = "Use other CLI";
 export const LOADING_AGENTS = "Loading agents…";
 // An unset Reviewer's button: what runs, the other CLI.
 export const otherCliWords = (cli) => `Other CLI (${NAMES[cli] ?? cli})`;
-export const otherCli = (worker) => (worker === "codex" ? "claude" : "codex");
+// The other CLI for an unset Reviewer or a Backup: the first installed-sounding one that isn't the worker's.
+export const otherCli = (worker) => AGENTS.find((k) => k !== worker) ?? "claude";
 // Reactions (herdr-task's reactions.py): every agent (Assistants, task workers, automation runs, agent tabs) reacts to
 // some of your messages with an emoji; off, none does. Kept as agents.reactions; SHEP-42 kept it as assistant.reactions
 // (upgradeReactions moves it).
@@ -144,8 +145,8 @@ export function modelLabel(menus, sel) {
 // What the agents offer, from each CLI's own settings (agents.js parseDefaults) and which are installed:
 // { menus, permDefault, defaults } (defaults: the first installed CLI's own, what an unset role runs).
 export function choicesFrom(dflts, installed = { claude: true, codex: true }) {
-  const menus = Object.fromEntries(["claude", "codex"].filter((k) => installed[k]).map((k) => [k, menuFor(k, dflts[k])]));
-  const permDefault = { claude: dflts.claude?.mode ?? "manual", codex: "auto" };
+  const menus = Object.fromEntries(AGENTS.filter((k) => installed[k]).map((k) => [k, menuFor(k, dflts[k])]));
+  const permDefault = { claude: dflts.claude?.mode ?? "manual", codex: "auto", pi: null };
   const first = menus.claude ? "claude" : Object.keys(menus)[0] ?? "claude";
   const c = current(first, [], {}, dflts[first]);
   const model = rowFor(first, c) ?? menus[first]?.models?.[0]?.id ?? null;
@@ -291,7 +292,7 @@ export function homeAbout(on, st) {
 }
 
 // ---- Window ----------------------------------------------------------------------------------------------------
-// On/off switches kept in shared state (on unless false), then Add-ons (lib/addons.json's switches).
+// On/off switches kept in shared state (on unless false, unless a switch says defaultOn: false), then Add-ons.
 export const SWITCHES = [
   { id: "tabs", title: "Show tabs", about: "The space's tabs, in the bar at the top. The bar's buttons stay either way.",
     key: "tabbar.tabs" },
@@ -307,8 +308,8 @@ export const SWITCHES = [
     key: "tasks.place" },
   { id: "helpers", title: "Show subagents above the chat box", about: "The agent's own subagents at work, listed over the box.",
     key: "chat.helpers" },
-  { id: "assistant", title: "Assistant in new spaces", about: "A new space opens with its Assistant's chat, else a terminal.",
-    key: "coordinator.auto" },
+  { id: "assistant", title: "Assistant in new spaces", about: "A new space opens with a terminal, unless this is on: then its Assistant's chat.",
+    key: "coordinator.auto", defaultOn: false },
 ];
 export const ADDONS = "Add-ons";
 // Usage insights' Delete, under its switch (the window's and the web's Settings > Window): every machine's log.

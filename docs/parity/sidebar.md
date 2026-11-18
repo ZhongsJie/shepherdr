@@ -20,7 +20,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Mark and name | workspace-chrome-shepherdr main.js:51 Herdr's logo, "Herdr" | A:163 the crook, "Shepherdr" (`snap.name`) | ◇ the window's brand row is the Herdr app's own chrome; the web app is Shepherdr's own page, so it names itself |
 | Voice call (SHEP-135) | main.js:76-77 wave icon button before Search (Voice add-on), asks spaces-chat for a call (shared "voice.startreq"); on a call Mute and End in an outlined capsule, asked of the call's chat (shared "chat.callreq") | A `registry.sideHead`: voice `VoiceButton`, wave icon button before Search, "Voice call"; on a call `CallControls`: Mute and End in an outlined capsule | ✓ |
 | Search | main.js:78 magnifier icon button, opens Jump (Ctrl+K) | A:174 `SearchButton`: magnifier icon button, opens Jump (Search); title "Search · Ctrl+K" | ✓ (2.1's "Search" box under the brand row removed) |
-| Sidebar toggle | main.js:80 sidebar icon: to the rail and back | A:168 `PlacesToggle` (Frame.tsx): hides or shows the sidebar | ◇ the web hides the column (no rail); on a phone or tablet the sidebar is a drawer |
+| Sidebar toggle | tabs-tasks main.js:210 panel icon in the tab bar: hides/shows the whole sidebar (spaces and the foot go with it); the plain panel icon both ways | A:168 `PlacesToggle` (Frame.tsx): hides or shows the sidebar | ◇ the web hides the column; the window keeps the button in the tab bar so it can open back |
 | Foot: Settings | main.js:44 cog "Settings" (Herdr's app settings, update dot) | none | ◇ Herdr's own app settings belong to the window app, not to Shepherdr's web page |
 | Foot: Shepherdr | main.js:46 crook "Shepherdr": Shepherdr settings | A:196 crook "Shepherdr": Settings | ✓ |
 | Foot: Add machine | main.js:47 plus "Add machine" | AM:12 plus "Add machine" (was a server icon) | ✓ |
@@ -115,6 +115,6 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Drag | main.js:505-578 among its own, into a section or Pinned, back to the top; a folded section opens while dragged over | P:584 drag.ts; a folded heading lights up | ◇ 2.1's drag look (the heading lights instead of the section opening) |
 | Alt+↑/↓ | keys.json space.next / space.prev | P:858 `stepPlace` | ✓ |
 | Alt+Shift+↑/↓ on a focused row | none | P:156 `moveKey` | ◇ the keyboard's form of the window's drag |
-| Rail (sidebar under 160 px) | main.js:666 numbers and a status glyph | none | ◇ the web hides the sidebar instead of narrowing it |
+| Folded | tabs-tasks main.js:210 hides the whole sidebar (`layout.hide sidebar`); the tab bar, its button and the work area fill the width | none | ◇ the web hides the column; the window keeps the tab-bar button, after the traffic lights |
 
 Counts: ✓ 61, ◇ 11, ✗ 0.

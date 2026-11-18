@@ -60,6 +60,16 @@ export default class Tabs extends View {
         if (c === undefined) continue;
         cmd = null;
         const tab = spaces().find(s => s.active)?.tabs.find(t => t.active);
+        if (c === "toggle-sidebar") {
+          const sb = find(layout(), "sidebar");
+          if (sb?.hidden) {
+            run("layout.show", { id: "sidebar" });
+            run("layout.show", { id: "sidebar-lists" });
+            run("layout.show", { id: "sidebar-footer" });
+          } else {
+            run("layout.hide", { id: "sidebar" });
+          }
+        }
         if (c === "close" && tab) closeTab(tab.id);
         // F2 / Shift+F2 (keys.json): our Rename dialogs for the shown tab and space.
         if (c === "rename-tab" && tab) renameTab(tab);
@@ -204,6 +214,23 @@ export default class Tabs extends View {
       // The bar runs to the window's right edge: menus opened from it place their submenus by it.
       .on_mouse_move((e) => { this.right = e.position.x - e.local_position.x + e.bounds.width; })
       .on_scroll_wheel(e => { if (Math.abs(e.delta.y) >= 1) run(e.delta.y > 0 ? "tab.prev" : "tab.next"); })
+      // The sidebar's fold/show: hides the whole sidebar (spaces and the foot go with it) and
+      // brings it back. It lives in the tab bar so it stays when the sidebar is gone; the plain
+      // panel icon both ways. After the traffic lights: lightsPadding slides it right while folded.
+      .child(h_flex().id("sidebar-toggle").h(H.sm).px(5).flex_none().items_center().rounded(RADIUS.control)
+        .cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+        .on_mouse_down("left", stop)
+        .on_click(() => {
+          if (sidebar?.hidden) {
+            run("layout.show", { id: "sidebar" });
+            run("layout.show", { id: "sidebar-lists" });
+            run("layout.show", { id: "sidebar-footer" });
+          } else {
+            run("layout.hide", { id: "sidebar" });
+          }
+        })
+        .tooltip(sidebar?.hidden ? "Show sidebar" : "Fold sidebar")
+        .child(svg("mods/workspace-chrome-shepherdr/sidebar.svg").size(15)))
       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().children(tabsShown ? shown.map(item) : []))
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu-tasks", kind: "popup", width: 250, height: 543, props: { right: this.right } })))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
